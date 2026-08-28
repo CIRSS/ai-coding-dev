@@ -1,0 +1,13 @@
+{
+  "name": "ai-coding-dev",
+  "version": "0.1.0",
+  "description": "A record of where each file in a repository came from and who has read which version of it",
+  "scripts": {
+    "test": "mocha tests/*.test.js"
+  },
+  "author": "Timothy M. McPhillips",
+  "license": "MIT",
+  "devDependencies": {
+    "mocha": "11.7.5"
+  }
+}

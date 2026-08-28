@@ -1,0 +1,230 @@
+#!/usr/bin/env node
+// Records which files a person has read, and reports what has changed since.
+//
+//     reviews record <path>...        stamp files as read at HEAD
+//     reviews declare <path> <origin> record how a file's content came to exist
+//     reviews show [--stale]          the report
+
+'use strict';
+
+const { execFileSync } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+
+const STATES = {
+    current: { icon: '✅', label: 'read, and unchanged since' },
+    drifted: { icon: '⚠️', label: 'read at an earlier commit; changed since' },
+    unread: { icon: '❌', label: 'no reading recorded' },
+    exempt: { icon: '⚙️', label: 'framework; not ours to read' },
+    generated: { icon: '🛠️', label: 'generated; read its generator instead' },
+};
+
+const ORIGINS = ['authored', 'generated', 'framework'];
+
+function fail(message) {
+    process.stderr.write(`reviews: ${message}\n`);
+    process.exit(2);
+}
+
+function git(args, options = {}) {
+    return execFileSync('git', args,
+        { cwd: REPO, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], ...options }).trim();
+}
+
+const REPO = (() => {
+    try {
+        return execFileSync('git', ['rev-parse', '--show-toplevel'],
+            { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+    } catch {
+        fail('not inside a git repository');
+    }
+})();
+
+const LOG = process.env.REVIEWS_LOG || path.join(REPO, 'reviews.jsonl');
+
+// null in a repository with no commits, which is where a first report is run.
+function headCommit() {
+    try {
+        return git(['rev-parse', 'HEAD']);
+    } catch {
+        return null;
+    }
+}
+
+// Returns the log's records in the order they were appended.
+function readLog() {
+    if (!fs.existsSync(LOG)) return [];
+    return fs.readFileSync(LOG, 'utf8').split('\n').filter(Boolean).map((line, index) => {
+        try {
+            return JSON.parse(line);
+        } catch {
+            fail(`${LOG} line ${index + 1} is not valid JSON`);
+        }
+    });
+}
+
+function append(record) {
+    fs.appendFileSync(LOG, `${JSON.stringify(record)}\n`);
+}
+
+// The paths git sees: tracked, plus untracked ones that are not ignored, minus
+// anything no longer on disk, which --cached still lists until the deletion is
+// staged.
+function filesGitSees() {
+    return git(['ls-files', '--cached', '--others', '--exclude-standard'])
+        .split('\n').filter(Boolean)
+        .filter((file) => fs.existsSync(path.join(REPO, file)));
+}
+
+// Every path this file has had, so a reading recorded before a rename still
+// counts. --follow reports the renames git can detect.
+function pathHistory(file) {
+    try {
+        const names = git(['log', '--follow', '--name-only', '--format=', '--', file]);
+        return new Set([file, ...names.split('\n').filter(Boolean)]);
+    } catch {
+        return new Set([file]);
+    }
+}
+
+// How much a file has changed since it was read, as [added, deleted], or null
+// if it has not. Compares the two blobs rather than the two paths, so a file
+// that has only moved compares equal.
+function changeSince(commit, readAs, file) {
+    let wasRead;
+    try {
+        wasRead = git(['rev-parse', `${commit}:${readAs}`]);
+    } catch {
+        return null;
+    }
+    const now = git(['hash-object', file]);
+    if (wasRead === now) return null;
+
+    const numstat = git(['diff', '--numstat', wasRead, now]);
+    const [added, deleted] = numstat.split('\t').map(Number);
+    return [added, deleted];
+}
+
+function statusOf(file, log) {
+    const declared = log.filter((r) => r.kind === 'origin' && r.path === file).pop();
+    const origin = declared ? declared.origin : 'authored';
+
+    const history = pathHistory(file);
+    const reading = log.filter((r) => r.kind === 'review' && history.has(r.path)).pop();
+
+    if (!reading) {
+        if (origin === 'framework') return { state: 'exempt', origin };
+        if (origin === 'generated') return { state: 'generated', origin, declared };
+        return { state: 'unread', origin };
+    }
+
+    const change = changeSince(reading.commit, reading.path, file);
+    return change
+        ? { state: 'drifted', origin, reading, change }
+        : { state: 'current', origin, reading };
+}
+
+function rows(log) {
+    return filesGitSees().sort().map((file) => ({ file, ...statusOf(file, log) }));
+}
+
+// --- subcommands ------------------------------------------------------------
+
+function record(paths, by) {
+    if (!paths.length) fail('reviews record needs at least one path');
+    const commit = headCommit();
+    if (!commit) fail('this repository has no commits; commit before recording a reading');
+    const reader = by || git(['config', 'user.name']);
+    if (!reader) fail('no --by given and git config user.name is unset');
+
+    const date = new Date().toISOString().slice(0, 10);
+    for (const file of paths) {
+        if (!fs.existsSync(path.join(REPO, file))) fail(`no such file: ${file}`);
+        // Reading is recorded against a commit, so what was read has to be in
+        // one. A file with uncommitted changes was not read as it now stands.
+        if (git(['status', '--porcelain', '--', file])) {
+            fail(`${file} has uncommitted changes; commit before recording a reading`);
+        }
+        append({ kind: 'review', path: file, commit, by: reader, date });
+        console.log(`${file}: read by ${reader} at ${commit.slice(0, 7)}`);
+    }
+}
+
+function declare(file, origin) {
+    if (!ORIGINS.includes(origin)) {
+        fail(`origin must be one of ${ORIGINS.join(', ')}`);
+    }
+    append({ kind: 'origin', path: file, origin });
+    console.log(`${file}: ${origin}`);
+}
+
+function show(onlyStale) {
+    const log = readLog();
+    const all = rows(log);
+    const counts = {};
+    for (const row of all) counts[row.state] = (counts[row.state] || 0) + 1;
+
+    const wanted = onlyStale
+        ? all.filter((row) => row.state === 'unread' || row.state === 'drifted')
+        : all;
+
+    const since = (row) => (row.state === 'drifted'
+        ? `${row.reading.commit.slice(0, 7)}, +${row.change[0]} −${row.change[1]} since`
+        : row.state === 'current' ? `${row.reading.commit.slice(0, 7)}, unchanged` : '');
+    const reader = (row) => (row.reading ? `${row.reading.by}, ${row.reading.date}` : '');
+
+    if (process.stdout.isTTY) {
+        const width = Math.max(...all.map((row) => row.file.length));
+        console.log();
+        for (const row of wanted) {
+            console.log(`  ${STATES[row.state].icon}  ${row.file.padEnd(width)}  `
+                + `${reader(row).padEnd(24)}${since(row)}`);
+        }
+        console.log();
+        for (const [state, { icon, label }] of Object.entries(STATES)) {
+            if (counts[state]) console.log(`  ${icon} ${String(counts[state]).padStart(3)}  ${label}`);
+        }
+        console.log();
+        return;
+    }
+
+    const lines = ['# Who has read what', ''];
+    const head = headCommit();
+    lines.push(head
+        ? `*Generated by \`reviews show\` at commit \`${head.slice(0, 7)}\`. `
+          + 'Rerun it to bring this up to date.*'
+        : '*Generated by `reviews show` before this repository had any commits.*', '');
+    lines.push('| | Files | Meaning |', '| --- | ---: | --- |');
+    for (const [state, { icon, label }] of Object.entries(STATES)) {
+        if (counts[state]) lines.push(`| ${icon} | ${counts[state]} | ${label} |`);
+    }
+    lines.push('', '❌ means no reading has been *recorded*, which is not the same as nobody '
+        + 'having read the file.', '');
+    lines.push('| | File | Read by | Since |', '| --- | --- | --- | --- |');
+    for (const row of wanted) {
+        lines.push(`| ${STATES[row.state].icon} | \`${row.file}\` | ${reader(row)} | ${since(row)} |`);
+    }
+    process.stdout.write(`${lines.join('\n')}\n`);
+}
+
+// --- dispatch ---------------------------------------------------------------
+
+// Anything unexpected is reported as a message. A stack trace tells a reader
+// nothing they can act on, and an uncaught throw exits 1, which is a verdict.
+process.on('uncaughtException', (error) => fail(error.message.split('\n')[0]));
+
+const [subcommand, ...rest] = process.argv.slice(2);
+const flag = (name) => {
+    const at = rest.indexOf(name);
+    return at === -1 ? null : rest.splice(at, 2)[1];
+};
+
+if (subcommand === 'record') {
+    record(rest.filter((a) => !a.startsWith('-')), flag('--by'));
+} else if (subcommand === 'declare') {
+    declare(rest[0], rest[1]);
+} else if (subcommand === 'show') {
+    show(rest.includes('--stale'));
+} else {
+    fail('usage: reviews record <path>... [--by NAME] | declare <path> <origin> | show [--stale]');
+}

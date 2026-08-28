@@ -1,0 +1,7 @@
+# Where a consuming REPRO persists its report. The log is not declared here: it
+# always belongs to the repository the command is run in, which the command
+# resolves for itself, and a single container-wide value would point every
+# repository at one file.
+repro.env REVIEWS_REPORT '${REPRO_MNT}/REVIEW.md'
+
+chmod +x "$1/reviews"

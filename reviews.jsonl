@@ -2,3 +2,39 @@
 {"kind":"origin","path":"Makefile-tests","origin":"framework"}
 {"kind":"origin","path":".editorconfig","origin":"framework"}
 {"kind":"origin","path":"REVIEW.md","origin":"generated"}
+{"kind":"review","path":"Dockerfile","commit":"317444e8ef63e36c3eb7faad1228ef5bed95c0f3","by":"Tim McPhillips","date":"2026-08-28"}
+{"kind":"review","path":"repro-config","commit":"317444e8ef63e36c3eb7faad1228ef5bed95c0f3","by":"Tim McPhillips","date":"2026-08-28"}
+{"kind":"review","path":"repro-config","blob":"3311606eaca2dd591f5a970080cd65e837e6722c","commit":"317444e8ef63e36c3eb7faad1228ef5bed95c0f3","by":"Tim McPhillips","date":"2026-08-28"}
+{"kind":"review","path":"repro-config","blob":"3311606eaca2dd591f5a970080cd65e837e6722c","by":"Tim McPhillips","date":"2026-08-28"}
+{"kind":"review","path":"exports/base-manifest","blob":"cf94e2e843dea2870736bb375f88225ef31f68d7","commit":"317444e8ef63e36c3eb7faad1228ef5bed95c0f3","by":"Tim McPhillips","date":"2026-08-29"}
+{"kind":"review","path":"exports/base-setup","blob":"cc0cc524d3fcd30917a702c8455d40224cac627d","by":"Tim McPhillips","date":"2026-08-29"}
+{"kind":"review","path":"exports/code-makefile","blob":"c88025a85496fe9dd9b97d198f52970765744b93","commit":"317444e8ef63e36c3eb7faad1228ef5bed95c0f3","by":"Tim McPhillips","date":"2026-08-29"}
+{"kind":"review","path":"exports/code-manifest","blob":"064a9904b8577345722c6b3ba92cceb4c1efe2a9","commit":"317444e8ef63e36c3eb7faad1228ef5bed95c0f3","by":"Tim McPhillips","date":"2026-08-29"}
+{"kind":"review","path":"exports/code-targets","blob":"6036ee0246fc99dd0d4ef5e4b6cf254c2c2b859e","commit":"317444e8ef63e36c3eb7faad1228ef5bed95c0f3","by":"Tim McPhillips","date":"2026-08-29"}
+{"kind":"review","path":"exports/readme.txt","blob":"15ddec06046e43904298d2dace20e9263d37b44c","commit":"317444e8ef63e36c3eb7faad1228ef5bed95c0f3","by":"Tim McPhillips","date":"2026-08-29"}
+{"kind":"review","path":"exports/report-makefile","blob":"9b2fe3e945d36a7949d49173f58b8a337aada0fe","by":"Tim McPhillips","date":"2026-08-29"}
+{"kind":"review","path":"exports/report-manifest","blob":"97ba5af31c6dfc1b9f2170260da1885e33c756b2","commit":"317444e8ef63e36c3eb7faad1228ef5bed95c0f3","by":"Tim McPhillips","date":"2026-08-29"}
+{"kind":"review","path":"exports/report-targets","blob":"6a2139eaef9aed0471eea109d11116c813736fba","commit":"317444e8ef63e36c3eb7faad1228ef5bed95c0f3","by":"Tim McPhillips","date":"2026-08-29"}
+{"kind":"review","path":"repro-config","blob":"ade2820fdfbfc69a8e29a2a8b805020c10cd2693","by":"Tim McPhillips","date":"2026-08-29"}
+{"kind":"review","path":"review-lifecycle.md","blob":"aa7d38d944285e64cb1041024e16c9fa6ae2240e","by":"Tim McPhillips","date":"2026-08-29","type":"cursory"}
+{"kind":"review","path":".gitignore","blob":"99eeeb0ed2fb6a96eafe559340492136c5034444","by":"Tim McPhillips","date":"2026-08-29","type":"cursory"}
+{"kind":"review","path":"Dockerfile","blob":"025b5b08ce0aebb23a0ecab32995b30679cfe65d","by":"Tim McPhillips","date":"2026-08-29","type":"careful"}
+{"kind":"review","path":"repro-config","blob":"ade2820fdfbfc69a8e29a2a8b805020c10cd2693","by":"Tim McPhillips","date":"2026-08-29","type":"careful"}
+{"kind":"review","path":"exports/base-manifest","blob":"cf94e2e843dea2870736bb375f88225ef31f68d7","by":"Tim McPhillips","date":"2026-08-29","type":"careful"}
+{"kind":"review","path":"exports/base-setup","blob":"cc0cc524d3fcd30917a702c8455d40224cac627d","by":"Tim McPhillips","date":"2026-08-29","type":"careful"}
+{"kind":"review","path":"exports/code-makefile","blob":"c88025a85496fe9dd9b97d198f52970765744b93","by":"Tim McPhillips","date":"2026-08-29","type":"careful"}
+{"kind":"review","path":"exports/code-manifest","blob":"064a9904b8577345722c6b3ba92cceb4c1efe2a9","by":"Tim McPhillips","date":"2026-08-29","type":"careful"}
+{"kind":"review","path":"exports/code-targets","blob":"6036ee0246fc99dd0d4ef5e4b6cf254c2c2b859e","by":"Tim McPhillips","date":"2026-08-29","type":"careful"}
+{"kind":"review","path":"exports/readme.txt","blob":"15ddec06046e43904298d2dace20e9263d37b44c","by":"Tim McPhillips","date":"2026-08-29","type":"careful"}
+{"kind":"review","path":"exports/report-makefile","blob":"9b2fe3e945d36a7949d49173f58b8a337aada0fe","by":"Tim McPhillips","date":"2026-08-29","type":"careful"}
+{"kind":"review","path":"exports/report-manifest","blob":"97ba5af31c6dfc1b9f2170260da1885e33c756b2","by":"Tim McPhillips","date":"2026-08-29","type":"careful"}
+{"kind":"review","path":"exports/report-targets","blob":"6a2139eaef9aed0471eea109d11116c813736fba","by":"Tim McPhillips","date":"2026-08-29","type":"careful"}
+{"kind":"review","path":"Dockerfile-parent","blob":"e1732b7e166fe70136df1ddbf6d086a3d5bbd2c6","by":"Tim McPhillips","date":"2026-08-29","type":"cursory"}
+{"kind":"origin","path":"reviews.jsonl","origin":"generated"}
+{"kind":"review","path":"package.json","blob":"c91b309a381a62dd068fdd4fa979900d059b8c46","by":"Timothy McPhillips","date":"2026-08-30","type":"careful"}
+{"kind":"review","path":"repro-config","blob":"2a82a411971cb856b7814cce770a195dee21189a","by":"Timothy McPhillips","date":"2026-08-30","type":"careful"}
+{"kind":"review","path":"Makefile","blob":"e1331d364be889b8d03dec9137805d83f402e015","by":"Timothy McPhillips","date":"2026-08-30","type":"cursory"}
+{"kind":"review","path":"repro-config","blob":"41be57669440181083a28df652b2fb5485869fdc","by":"Timothy McPhillips","date":"2026-08-30","type":"cursory"}
+{"kind":"review","path":"review-lifecycle.md","blob":"d5506de8c81792df73a95b94d7adaea2589f843b","by":"Timothy McPhillips","date":"2026-08-30","type":"careful"}
+{"kind":"review","path":"review-lifecycle.md","blob":"a354d98795ab8a8512c4f8fdd6250ae72843f73f","by":"Timothy McPhillips","date":"2026-08-30","type":"careful"}
+{"kind":"review","path":"reviews","blob":"14a094429f7919bfe4be770dd2bd264db1c95c8a","by":"Timothy McPhillips","date":"2026-08-30","type":"careful"}

@@ -31,13 +31,24 @@ function repository(steps) {
 
 // Runs reviews in a repository and returns { exit, stdout, stderr }. stdout is
 // not a terminal here, so show emits Markdown.
-function reviews(dir, args) {
+// REVIEWS_BY is cleared unless a case sets it: the container these tests run in
+// carries the host's, and a suite that inherits it tests the developer's shell.
+function reviews(dir, args, env = {}) {
+    const options = { cwd: dir, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
+        env: { ...process.env, REVIEWS_BY: '', ...env } };
     try {
-        return { exit: 0, stdout: execFileSync('reviews', args,
-            { cwd: dir, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }), stderr: '' };
+        return { exit: 0, stdout: execFileSync('reviews', args, options), stderr: '' };
     } catch (error) {
         return { exit: error.status, stdout: error.stdout || '', stderr: error.stderr || '' };
     }
+}
+
+// Runs reviews under a pseudo-terminal, so show takes its terminal branch.
+function reviewsAtTerminal(dir, args) {
+    const output = execFileSync('script',
+        ['-qec', ['reviews', ...args].join(' '), '/dev/null'],
+        { cwd: dir, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+    return output.split('\r').join('');
 }
 
 const move = (dir, from, to) => {
@@ -46,54 +57,309 @@ const move = (dir, from, to) => {
 };
 
 describe('reviews', function () {
-    it('reports a file nobody has recorded reading as unread', function () {
+    it('reports a file nobody has reviewed as unreviewed', function () {
         const dir = repository([{ 'a.txt': 'one\n' }]);
         const { stdout } = reviews(dir, ['show']);
-        assert.match(stdout, /❌ \| `a\.txt`/);
+        assert.match(stdout, /\|\s+\|\s+\| ❌ \|\s+\| `a\.txt`/);
     });
 
-    it('reports a file as current when nothing has changed since the reading', function () {
+    it('reports a file as current when nothing has changed since the review', function () {
         const dir = repository([{ 'a.txt': 'one\n' }]);
         reviews(dir, ['record', 'a.txt']);
         const { stdout } = reviews(dir, ['show']);
-        assert.match(stdout, /✅ \| `a\.txt` \| A Person/);
+        assert.match(stdout, /\|\s+\| 👀 \|\s+\|\s+\| `a\.txt` \| A Person/);
         assert.match(stdout, /unchanged/);
     });
 
-    it('reports how much has changed since the reading', function () {
+    it('reports how much has changed since the review', function () {
         const dir = repository([{ 'a.txt': 'one\n' }]);
         reviews(dir, ['record', 'a.txt']);
         fs.writeFileSync(path.join(dir, 'a.txt'), 'one\ntwo\nthree\n');
         execFileSync('git', ['commit', '-qam', 'grow'], { cwd: dir });
         const { stdout } = reviews(dir, ['show']);
-        assert.match(stdout, /⚠️ \| `a\.txt`/);
+        assert.match(stdout, /\|\s+\|\s+\| ⚠️ \|\s+\| `a\.txt`/);
         assert.match(stdout, /\+2 −0 since/);
     });
 
-    it('carries a reading across a rename', function () {
+    it('measures change that has not been committed yet', function () {
+        const dir = repository([{ 'a.txt': 'one\n' }]);
+        reviews(dir, ['record', 'a.txt']);
+        fs.writeFileSync(path.join(dir, 'a.txt'), 'one\ntwo\n');
+        const { exit, stdout } = reviews(dir, ['show']);
+        assert.strictEqual(exit, 0, stdout);
+        assert.match(stdout, /\+1 −0 since/);
+    });
+
+    it('names no commit when what was reviewed is in none', function () {
+        const dir = repository([{ 'a.txt': 'one\n' }]);
+        fs.writeFileSync(path.join(dir, 'a.txt'), 'edited\n');
+        reviews(dir, ['record', 'a.txt']);
+        assert.match(reviews(dir, ['show']).stdout, /unchanged since it was reviewed/);
+    });
+
+    it('stores no commit, so the report cannot cache a stale one', function () {
+        const dir = repository([{ 'a.txt': 'one\n' }]);
+        reviews(dir, ['record', 'a.txt']);
+        const record = JSON.parse(fs.readFileSync(path.join(dir, 'reviews.jsonl'), 'utf8')
+            .split('\n')[0]);
+        assert.ok(!record.commit, 'a stored commit is an answer that goes stale');
+        assert.ok(record.blob, 'the blob is what identifies the reviewed content');
+    });
+
+    it('names the commit once content reviewed before it was committed lands', function () {
+        const dir = repository([{ 'a.txt': 'one\n' }]);
+        fs.writeFileSync(path.join(dir, 'a.txt'), 'edited\n');
+        reviews(dir, ['record', 'a.txt']);
+        assert.match(reviews(dir, ['show']).stdout, /unchanged since it was reviewed/);
+
+        execFileSync('git', ['commit', '-qam', 'land it'], { cwd: dir });
+        const head = execFileSync('git', ['rev-parse', 'HEAD'],
+            { cwd: dir, encoding: 'utf8' }).trim().slice(0, 7);
+        assert.match(reviews(dir, ['show']).stdout, new RegExp(`unchanged since ${head}`));
+    });
+
+    it('stops naming a commit an amend has orphaned', function () {
+        const dir = repository([{ 'a.txt': 'one\n' }]);
+        reviews(dir, ['record', 'a.txt']);
+        const before = execFileSync('git', ['rev-parse', 'HEAD'],
+            { cwd: dir, encoding: 'utf8' }).trim().slice(0, 7);
+        assert.match(reviews(dir, ['show']).stdout, new RegExp(`unchanged since ${before}`));
+
+        execFileSync('git', ['commit', '-q', '--amend', '-m', 'reworded'], { cwd: dir });
+        const stdout = reviews(dir, ['show']).stdout;
+        assert.doesNotMatch(stdout, new RegExp(before),
+            'named a commit no longer reachable, which 404s for anyone who cloned');
+        const after = execFileSync('git', ['rev-parse', 'HEAD'],
+            { cwd: dir, encoding: 'utf8' }).trim().slice(0, 7);
+        assert.match(stdout, new RegExp(`unchanged since ${after}`));
+    });
+
+    it('records a cursory review when no type is given', function () {
+        const dir = repository([{ 'a.txt': 'one\n' }]);
+        reviews(dir, ['record', 'a.txt']);
+        const record = JSON.parse(fs.readFileSync(path.join(dir, 'reviews.jsonl'), 'utf8')
+            .split('\n')[0]);
+        assert.strictEqual(record.type, 'cursory', 'the cheapest claim must be the weakest');
+        assert.match(reviews(dir, ['show']).stdout, /\|\s+\| 👀 \|\s+\|\s+\| `a\.txt`/);
+    });
+
+    it('records a careful review when asked for one', function () {
+        const dir = repository([{ 'a.txt': 'one\n' }]);
+        reviews(dir, ['record', 'a.txt', '--careful']);
+        assert.match(reviews(dir, ['show']).stdout, /\|\s+\| 👀 \| ✅ \|\s+\| `a\.txt`/);
+    });
+
+    it('records a formal review when asked for one', function () {
+        const dir = repository([{ 'a.txt': 'one\n', 'record.md': 'what we found\n' }]);
+        reviews(dir, ['record', 'a.txt', '--formal', '--evidence', 'record.md']);
+        const { stdout } = reviews(dir, ['show']);
+        // A formal review is a careful one and more, so it keeps the tick.
+        assert.match(stdout, /\|\s+\| 👀 \| ✅ \| 🔬 \| `a\.txt`/);
+        assert.match(stdout, /per record\.md/);
+    });
+
+    it('lets a review below formal name its evidence too', function () {
+        const dir = repository([{ 'a.txt': 'one\n', 'notes.md': 'what I checked\n' }]);
+        const { exit } = reviews(dir,
+            ['record', 'a.txt', '--careful', '--evidence', 'notes.md']);
+        assert.strictEqual(exit, 0, 'evidence is optional below formal, not forbidden');
+        const { stdout } = reviews(dir, ['show']);
+        assert.match(stdout, /\|\s+\| 👀 \| ✅ \|\s+\| `a\.txt`/);
+        assert.match(stdout, /per notes\.md/);
+    });
+
+    it('refuses a formal review that names no record of itself', function () {
+        const dir = repository([{ 'a.txt': 'one\n' }]);
+        const { exit, stderr } = reviews(dir, ['record', 'a.txt', '--formal']);
+        assert.strictEqual(exit, 2);
+        assert.match(stderr, /a formal review names what records it/);
+    });
+
+    it('refuses evidence that is not in the repository', function () {
+        const dir = repository([{ 'a.txt': 'one\n' }]);
+        const { exit, stderr } = reviews(dir,
+            ['record', 'a.txt', '--formal', '--evidence', 'absent.md']);
+        assert.strictEqual(exit, 2);
+        assert.match(stderr, /no such file: absent\.md/);
+    });
+
+    it('pins the evidence to the version that existed at the time', function () {
+        const dir = repository([{ 'a.txt': 'one\n', 'record.md': 'what we found\n' }]);
+        reviews(dir, ['record', 'a.txt', '--formal', '--evidence', 'record.md']);
+        const recorded = JSON.parse(fs.readFileSync(path.join(dir, 'reviews.jsonl'), 'utf8')
+            .split('\n')[0]);
+        const pinned = execFileSync('git', ['hash-object', 'record.md'],
+            { cwd: dir, encoding: 'utf8' }).trim();
+        assert.strictEqual(recorded.evidence.path, 'record.md');
+        assert.strictEqual(recorded.evidence.blob, pinned);
+    });
+
+    it('shows the state of the evidence beside the formal review', function () {
+        const dir = repository([{ 'a.txt': 'one\n', 'record.md': 'what we found\n' }]);
+        reviews(dir, ['record', 'a.txt', '--formal', '--evidence', 'record.md']);
+        // Nobody has reviewed the record itself, which is worth seeing.
+        assert.match(reviews(dir, ['show']).stdout, /per record\.md ❌/);
+        reviews(dir, ['record', 'record.md', '--careful']);
+        assert.match(reviews(dir, ['show']).stdout, /per record\.md 👀✅/);
+    });
+
+    it('refuses evidence git cannot carry', function () {
+        const dir = repository([{ 'a.txt': 'one\n', '.gitignore': 'notes.md\n' }]);
+        fs.writeFileSync(path.join(dir, 'notes.md'), 'what I checked\n');
+        const { exit, stderr } = reviews(dir,
+            ['record', 'a.txt', '--formal', '--evidence', 'notes.md']);
+        assert.strictEqual(exit, 2, 'the file is on disk, so existence is not the test');
+        assert.match(stderr, /git does not carry notes\.md/);
+    });
+
+    it('says so when the evidence file is gone', function () {
+        const dir = repository([{ 'a.txt': 'one\n', 'record.md': 'what we found\n' }]);
+        reviews(dir, ['record', 'a.txt', '--formal', '--evidence', 'record.md']);
+        execFileSync('git', ['rm', '-q', 'record.md'], { cwd: dir });
+        execFileSync('git', ['commit', '-qm', 'drop the record'], { cwd: dir });
+        const { stdout } = reviews(dir, ['show']);
+        // The mark stays 🔬 — what is claimed does not change because the
+        // evidence went — so the row has to say the claim now rests on nothing.
+        assert.match(stdout, /per record\.md — no longer in the repository/);
+    });
+
+    it('refuses two review types at once', function () {
+        const dir = repository([{ 'a.txt': 'one\n', 'record.md': 'what we found\n' }]);
+        const { exit, stderr } = reviews(dir,
+            ['record', 'a.txt', '--careful', '--formal', '--evidence', 'record.md']);
+        assert.strictEqual(exit, 2);
+        assert.match(stderr, /one review type/);
+    });
+
+    it('shows a review recorded before types as type not recorded', function () {
+        const dir = repository([{ 'a.txt': 'one\n' }]);
+        const blob = execFileSync('git', ['hash-object', '-w', 'a.txt'],
+            { cwd: dir, encoding: 'utf8' }).trim();
+        fs.writeFileSync(path.join(dir, 'reviews.jsonl'),
+            `${JSON.stringify({ kind: 'review', path: 'a.txt', blob,
+                by: 'A Person', date: '2026-08-01' })}\n`);
+        const { stdout } = reviews(dir, ['show']);
+        assert.match(stdout, /\|\s+\|\s+\| ❔ \|\s+\| `a\.txt`/, 'an absent type is not a cursory claim');
+        assert.match(stdout, /type not recorded/);
+    });
+
+    it('keeps the terminal columns aligned when an icon is two glyphs', function () {
+        const dir = repository([{ 'a.txt': 'one\n', 'b.txt': 'two\n',
+            'record.md': 'what we found\n' }]);
+        reviews(dir, ['record', 'a.txt', '--formal', '--evidence', 'record.md']);
+        reviews(dir, ['record', 'b.txt']);
+        const rows = reviewsAtTerminal(dir, ['show']).split('\n')
+            .filter((line) => /`?[ab]\.txt/.test(line));
+        // Terminal columns are display cells, not string indices: an emoji
+        // occupies two cells and may be one or two UTF-16 units, so neither
+        // length nor glyph count says where a column starts.
+        const cells = (text) => [...new Intl.Segmenter().segment(text)]
+            .reduce((n, { segment }) =>
+                n + (/\p{Extended_Pictographic}/u.test(segment) ? 2 : 1), 0);
+        const columns = rows.map((line) => cells(line.slice(0, line.indexOf('.txt'))));
+        assert.strictEqual(new Set(columns).size, 1,
+            `file column did not line up:\n${rows.join('\n')}`);
+    });
+
+    it('holds the icon columns fixed across views', function () {
+        const dir = repository([{ 'a.txt': 'one\n', 'b.txt': 'two\n',
+            'record.md': 'what we found\n' }]);
+        reviews(dir, ['record', 'a.txt', '--formal', '--evidence', 'record.md']);
+        // The three columns mean looked, judged, and done to protocol, so they
+        // are structural: a verdict belongs in the same place in every view.
+        const rowFor = (args) => reviewsAtTerminal(dir, args)
+            .split('\n').find((line) => line.includes('b.txt'));
+        assert.strictEqual(rowFor(['show']).indexOf('❌'),
+            rowFor(['show', '--stale']).indexOf('❌'),
+            'the same file should sit in the same column whichever view lists it');
+    });
+
+    it('says what to do when no reviewer can be determined', function () {
+        const dir = repository([{ 'a.txt': 'one\n' }]);
+        execFileSync('git', ['config', '--unset', 'user.name'], { cwd: dir });
+        const { exit, stderr } = reviews(dir, ['record', 'a.txt']);
+        assert.strictEqual(exit, 2);
+        assert.match(stderr, /pass --by NAME/);
+        assert.doesNotMatch(stderr, /Command failed/,
+            'git exits non-zero for an unset key; the throw must not reach the reviewer');
+    });
+
+    it('takes the reviewer from REVIEWS_BY where git has no identity', function () {
+        const dir = repository([{ 'a.txt': 'one\n' }]);
+        execFileSync('git', ['config', '--unset', 'user.name'], { cwd: dir });
+        const { exit } = reviews(dir, ['record', 'a.txt'], { REVIEWS_BY: 'A Reviewer' });
+        assert.strictEqual(exit, 0, 'a container has no git identity; this is the usual path');
+        assert.match(reviews(dir, ['show']).stdout, /A Reviewer/);
+    });
+
+    it('prefers --by over REVIEWS_BY', function () {
+        const dir = repository([{ 'a.txt': 'one\n' }]);
+        reviews(dir, ['record', 'a.txt', '--by', 'Named Explicitly'],
+            { REVIEWS_BY: 'From The Environment' });
+        const { stdout } = reviews(dir, ['show']);
+        assert.match(stdout, /Named Explicitly/);
+        assert.doesNotMatch(stdout, /From The Environment/);
+    });
+
+    it('carries an origin declaration across a rename', function () {
+        const dir = repository([{ 'a.txt': 'one\n' }]);
+        reviews(dir, ['declare', 'a.txt', 'framework']);
+        move(dir, 'a.txt', 'moved.txt');
+        const { stdout } = reviews(dir, ['show']);
+        assert.match(stdout, /\| ⚙️ \|\s+\|\s+\|\s+\| `moved\.txt`/);
+    });
+
+    it('gives a conflicted file one row, not one per stage', function () {
+        const dir = repository([{ 'a.txt': 'base\n' }]);
+        const run = (args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' });
+        run(['checkout', '-q', '-b', 'other']);
+        fs.writeFileSync(path.join(dir, 'a.txt'), 'theirs\n');
+        run(['commit', '-qam', 'theirs']);
+        run(['checkout', '-q', '-']);
+        fs.writeFileSync(path.join(dir, 'a.txt'), 'ours\n');
+        run(['commit', '-qam', 'ours']);
+        try {
+            run(['merge', '-q', 'other']);
+        } catch {
+            // the conflict is the point
+        }
+        const rows = reviews(dir, ['show']).stdout
+            .split('\n').filter((line) => line.includes('`a.txt`'));
+        assert.strictEqual(rows.length, 1, `expected one row, got:\n${rows.join('\n')}`);
+    });
+
+    it('carries a review across a rename', function () {
         const dir = repository([{ 'a.txt': 'one\n' }]);
         reviews(dir, ['record', 'a.txt']);
         move(dir, 'a.txt', 'moved.txt');
         const { stdout } = reviews(dir, ['show']);
-        assert.match(stdout, /✅ \| `moved\.txt`/);
+        assert.match(stdout, /\|\s+\| 👀 \|\s+\|\s+\| `moved\.txt`/);
     });
 
-    it('refuses to record a reading of a file with uncommitted changes', function () {
+    it('records a review of a file that has uncommitted changes', function () {
         const dir = repository([{ 'a.txt': 'one\n' }]);
         fs.writeFileSync(path.join(dir, 'a.txt'), 'edited\n');
-        const { exit, stderr } = reviews(dir, ['record', 'a.txt']);
-        assert.strictEqual(exit, 2);
-        assert.match(stderr, /commit before recording/);
+        assert.strictEqual(reviews(dir, ['record', 'a.txt']).exit, 0);
+        assert.match(reviews(dir, ['show']).stdout, /\|\s+\| 👀 \|\s+\|\s+\| `a\.txt`/);
     });
 
-    it('refuses to record a reading of a file that does not exist', function () {
+    it('records a review in a repository with no commits', function () {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'reviews-'));
+        execFileSync('git', ['init', '-q'], { cwd: dir });
+        execFileSync('git', ['config', 'user.name', 'A Person'], { cwd: dir });
+        fs.writeFileSync(path.join(dir, 'a.txt'), 'one\n');
+        assert.strictEqual(reviews(dir, ['record', 'a.txt']).exit, 0);
+        assert.match(reviews(dir, ['show']).stdout, /\|\s+\| 👀 \|.*`a\.txt`.*it was reviewed/);
+    });
+
+    it('refuses to record a review of a file that does not exist', function () {
         const dir = repository([{ 'a.txt': 'one\n' }]);
         const { exit, stderr } = reviews(dir, ['record', 'nope.txt']);
         assert.strictEqual(exit, 2);
         assert.match(stderr, /no such file/);
     });
 
-    it('credits a reading to the name given', function () {
+    it('credits a review to the name given', function () {
         const dir = repository([{ 'a.txt': 'one\n' }]);
         reviews(dir, ['record', 'a.txt', '--by', 'Someone Else']);
         const { stdout } = reviews(dir, ['show']);
@@ -104,14 +370,36 @@ describe('reviews', function () {
         const dir = repository([{ 'a.txt': 'one\n' }]);
         reviews(dir, ['declare', 'a.txt', 'framework']);
         const { stdout } = reviews(dir, ['show']);
-        assert.match(stdout, /⚙️ \| `a\.txt`/);
+        assert.match(stdout, /\| ⚙️ \|\s+\|\s+\|\s+\| `a\.txt`/);
     });
 
     it('sends a file declared as generated to its generator', function () {
         const dir = repository([{ 'a.txt': 'one\n' }]);
         reviews(dir, ['declare', 'a.txt', 'generated']);
         const { stdout } = reviews(dir, ['show']);
-        assert.match(stdout, /🛠️ \| `a\.txt`/);
+        assert.match(stdout, /\| 🛠️ \|\s+\|\s+\|\s+\| `a\.txt`/);
+    });
+
+    it('keeps the origin when someone reviews a framework file anyway', function () {
+        const dir = repository([{ 'a.txt': 'one\n' }]);
+        reviews(dir, ['declare', 'a.txt', 'framework']);
+        reviews(dir, ['record', 'a.txt']);
+        const { stdout } = reviews(dir, ['show']);
+        assert.match(stdout, /\| ⚙️ \| 👀 \|\s+\|\s+\| `a\.txt`/,
+            'a review must not erase the fact that the file was never ours to review');
+    });
+
+    it('counts a reviewed framework file in both tallies', function () {
+        const dir = repository([{ 'a.txt': 'one\n', 'b.txt': 'two\n' }]);
+        reviews(dir, ['declare', 'a.txt', 'framework']);
+        reviews(dir, ['record', 'a.txt']);
+        reviews(dir, ['declare', 'b.txt', 'framework']);
+        const summary = reviews(dir, ['show']).stdout.split('❌ means')[0];
+        // Review state and origin are independent, so a file that is both is
+        // counted in each; counting it once dropped it from the framework tally.
+        // The origin line shows what is left undone, of how many there are.
+        assert.match(summary, /\| ⚙️ \|\s*\|\s*\|\s*\| 1 \| of 2 framework files unreviewed/);
+        assert.match(summary, /\|\s*\| 👀 \|\s*\|\s*\| 1 \| reviewed cursorily/);
     });
 
     it('refuses an origin it does not define', function () {
@@ -121,7 +409,7 @@ describe('reviews', function () {
         assert.match(stderr, /origin must be one of/);
     });
 
-    it('lists only what wants a reader with --stale', function () {
+    it('lists only what wants a reviewer with --stale', function () {
         const dir = repository([{ 'a.txt': 'one\n', 'b.txt': 'two\n' }]);
         reviews(dir, ['record', 'a.txt']);
         const { stdout } = reviews(dir, ['show', '--stale']);
@@ -129,7 +417,7 @@ describe('reviews', function () {
         assert.match(stdout, /`b\.txt`/);
     });
 
-    it('keeps the log append-only across several readings', function () {
+    it('keeps the log append-only across several reviews', function () {
         const dir = repository([{ 'a.txt': 'one\n' }]);
         reviews(dir, ['record', 'a.txt']);
         reviews(dir, ['declare', 'a.txt', 'authored']);
@@ -139,6 +427,33 @@ describe('reviews', function () {
         assert.strictEqual(lines.length, 3);
         assert.strictEqual(JSON.parse(lines[0]).kind, 'review');
         assert.strictEqual(JSON.parse(lines[1]).kind, 'origin');
+    });
+
+    it("does not take the reader's name for a path", function () {
+        const dir = repository([{ 'a.txt': 'one\n' }]);
+        assert.strictEqual(reviews(dir, ['record', 'a.txt', '--by', 'Someone Else']).exit, 0);
+    });
+
+    it('writes nothing when any path in the command is bad', function () {
+        const dir = repository([{ 'a.txt': 'one\n' }]);
+        assert.strictEqual(reviews(dir, ['record', 'a.txt', 'nope.txt']).exit, 2);
+        assert.ok(!fs.existsSync(path.join(dir, 'reviews.jsonl')),
+            'a failed command left records behind');
+    });
+
+    it('writes a table rather than Markdown at a terminal', function () {
+        const dir = repository([{ 'a.txt': 'one\n' }]);
+        const output = reviewsAtTerminal(dir, ['show']);
+        assert.match(output, /❌\s+a\.txt/);
+        assert.doesNotMatch(output, /\| --- \|/);
+    });
+
+    it('keeps the columns apart when a reader\'s name is long', function () {
+        const dir = repository([{ 'a.txt': 'one\n' }]);
+        reviews(dir, ['record', 'a.txt', '--by', 'A Person With A Very Long Name Indeed']);
+        const line = reviewsAtTerminal(dir, ['show']).split('\n')
+            .find((l) => l.includes('a.txt'));
+        assert.match(line, /Indeed, \d{4}-\d{2}-\d{2} {2}unchanged since/);
     });
 
     it('refuses to run outside a git repository', function () {

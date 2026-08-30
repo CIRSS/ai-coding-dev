@@ -1,7 +1,10 @@
 #!/usr/bin/env node
-// Records which files a person has read, and reports what has changed since.
+// Records which files a person has reviewed, and reports what has changed since.
 //
-//     reviews record <path>...        stamp files as read at HEAD
+//     reviews record <path>...        record a cursory review of files as they stand
+//         --careful                   record a careful one instead
+//         --formal                    record a formal one, which needs evidence
+//         --evidence <artifact>       name what records the review, at any level
 //     reviews declare <path> <origin> record how a file's content came to exist
 //     reviews show [--stale]          the report
 
@@ -11,15 +14,52 @@ const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-const STATES = {
-    current: { icon: '✅', label: 'read, and unchanged since' },
-    drifted: { icon: '⚠️', label: 'read at an earlier commit; changed since' },
-    unread: { icon: '❌', label: 'no reading recorded' },
-    exempt: { icon: '⚙️', label: 'framework; not ours to read' },
-    generated: { icon: '🛠️', label: 'generated; read its generator instead' },
+// What a row shows, as four columns: whose file it is, then whether anyone
+// looked, what they concluded, and whether a protocol was followed. A review
+// fills the last three from the left and its strength reads as how far it gets;
+// anything that is not a review has nothing to say about looking, so it starts
+// at the verdict and every verdict — ✅ ❌ ⚠️ — reads down one column.
+//
+// Origin holds a column of its own because it answers a different question. It
+// used to occupy the verdict column, where a single review of a framework file
+// erased the fact that the file was never ours to review.
+//
+// Markdown gets four table columns and aligns them itself, which is why no
+// filler is needed: every blank is a real empty cell.
+const ORIGIN_MARKS = { framework: '⚙️', generated: '🛠️', authored: '' };
+
+const DISPLAY = {
+    'current:cursory': { marks: ['👀', '', ''], label: 'reviewed cursorily, and unchanged since' },
+    'current:careful': { marks: ['👀', '✅', ''], label: 'reviewed carefully, and unchanged since' },
+    'current:formal': { marks: ['👀', '✅', '🔬'], label: 'formally reviewed, and unchanged since' },
+    'current:none': { marks: ['', '❔', ''], label: 'reviewed, type not recorded' },
+    drifted: { marks: ['', '⚠️', ''], label: 'reviewed earlier; changed since' },
+    unread: { marks: ['', '❌', ''], label: 'no review recorded' },
+    // A file that is not ours wants no reviewer, so it shows its origin and
+    // makes no claim in the other three columns.
+    exempt: { marks: ['', '', ''], label: 'framework files unreviewed; not ours to review' },
+    generated: { marks: ['', '', ''], label: 'generated files unreviewed; review the generator' },
 };
 
+const marksOf = (row) => [ORIGIN_MARKS[row.origin] || '', ...DISPLAY[displayOf(row)].marks];
+
+const cellsOf = (marks) => marks.map((mark) => ` ${mark} `).join('|');
+const iconOf = (marks) => marks.filter(Boolean).join('');
+
+// Every record written since types existed carries one, so an absent type marks
+// a record that predates them rather than one claiming the weakest level.
+const displayOf = (row) => (row.state === 'current'
+    ? `current:${row.reading.type || 'none'}`
+    : row.state);
+
+// Icons are measured in terminal cells, not characters: these render
+// double-width, and a variation selector makes some of them two UTF-16 units,
+// so neither string length nor glyph count locates a column.
+const cells = (icon) => [...new Intl.Segmenter().segment(icon)]
+    .reduce((n, { segment }) => n + (/\p{Extended_Pictographic}/u.test(segment) ? 2 : 1), 0);
+
 const ORIGINS = ['authored', 'generated', 'framework'];
+const TYPES = ['cursory', 'careful', 'formal'];
 
 function fail(message) {
     process.stderr.write(`reviews: ${message}\n`);
@@ -71,8 +111,11 @@ function append(record) {
 // anything no longer on disk, which --cached still lists until the deletion is
 // staged.
 function filesGitSees() {
-    return git(['ls-files', '--cached', '--others', '--exclude-standard'])
-        .split('\n').filter(Boolean)
+    // An unmerged path is listed once per stage, so the set collapses a
+    // conflicted file back to the one row it should have.
+    const listed = git(['ls-files', '--cached', '--others', '--exclude-standard'])
+        .split('\n').filter(Boolean);
+    return [...new Set(listed)]
         .filter((file) => fs.existsSync(path.join(REPO, file)));
 }
 
@@ -87,38 +130,70 @@ function pathHistory(file) {
     }
 }
 
-// How much a file has changed since it was read, as [added, deleted], or null
-// if it has not. Compares the two blobs rather than the two paths, so a file
-// that has only moved compares equal.
-function changeSince(commit, readAs, file) {
-    let wasRead;
+// How much a file has changed since it was read, as [added, deleted], null if
+// it has not, or 'gone' if what was read is no longer in the object store.
+// Comparing blobs rather than paths means a file that has only moved compares
+// equal.
+function changeSince(wasRead, file) {
+    if (!wasRead) return 'gone';
+    // -w stores the object, without which the diff below has nothing to read.
+    const now = git(['hash-object', '-w', file]);
+    if (wasRead === now) return null;
+
     try {
-        wasRead = git(['rev-parse', `${commit}:${readAs}`]);
+        const numstat = git(['diff', '--numstat', wasRead, now]);
+        const [added, deleted] = numstat.split('\t').map(Number);
+        return [added, deleted];
+    } catch {
+        return 'gone';
+    }
+}
+
+// The commit that introduced this content, or null if none does. Asked afresh
+// on every run, because a stored answer goes stale in both directions: content
+// committed after it was reviewed, and a commit orphaned by an amend or rebase.
+function commitFor(blob) {
+    if (!blob) return null;
+    try {
+        const found = git(['log', '--format=%H', '--find-object', blob]);
+        const commits = found.split('\n').filter(Boolean);
+        // git log is newest first, so the commit that introduced it is the last.
+        return commits.length ? commits[commits.length - 1] : null;
     } catch {
         return null;
     }
-    const now = git(['hash-object', file]);
-    if (wasRead === now) return null;
+}
 
-    const numstat = git(['diff', '--numstat', wasRead, now]);
-    const [added, deleted] = numstat.split('\t').map(Number);
-    return [added, deleted];
+// What a review was of. Records written before reviews were anchored to
+// blobs name a commit and a path instead, which resolve to the same thing.
+function blobRead(reading) {
+    if (reading.blob) return reading.blob;
+    try {
+        return git(['rev-parse', `${reading.commit}:${reading.path}`]);
+    } catch {
+        return null;
+    }
 }
 
 function statusOf(file, log) {
-    const declared = log.filter((r) => r.kind === 'origin' && r.path === file).pop();
+    // Both an origin and a review follow the file across renames. Matching an
+    // origin on the exact path alone would silently drop a declaration the
+    // moment the file moved.
+    const history = pathHistory(file);
+    const declared = log.filter((r) => r.kind === 'origin' && history.has(r.path)).pop();
     const origin = declared ? declared.origin : 'authored';
 
-    const history = pathHistory(file);
     const reading = log.filter((r) => r.kind === 'review' && history.has(r.path)).pop();
 
     if (!reading) {
+        // Origin decides only whether a reviewer is wanted, never what a review
+        // said; it keeps its own column either way.
         if (origin === 'framework') return { state: 'exempt', origin };
         if (origin === 'generated') return { state: 'generated', origin, declared };
         return { state: 'unread', origin };
     }
 
-    const change = changeSince(reading.commit, reading.path, file);
+    const change = changeSince(blobRead(reading), file);
     return change
         ? { state: 'drifted', origin, reading, change }
         : { state: 'current', origin, reading };
@@ -130,23 +205,62 @@ function rows(log) {
 
 // --- subcommands ------------------------------------------------------------
 
-function record(paths, by) {
+function record(paths, by, type, evidencePath) {
     if (!paths.length) fail('reviews record needs at least one path');
-    const commit = headCommit();
-    if (!commit) fail('this repository has no commits; commit before recording a reading');
-    const reader = by || git(['config', 'user.name']);
-    if (!reader) fail('no --by given and git config user.name is unset');
+    if (!TYPES.includes(type)) fail(`review type must be one of ${TYPES.join(', ')}`);
+    // Any review may name what records it; a formal one must. That is the whole
+    // of what makes the top level checkable rather than merely asserted, and a
+    // flag that raised the claim without adding anything would have made it the
+    // easiest thing on the scale to say.
+    if (type === 'formal' && !evidencePath) {
+        fail('a formal review names what records it: --formal --evidence <artifact>');
+    }
+    if (evidencePath) {
+        if (!fs.existsSync(path.join(REPO, evidencePath))) fail(`no such file: ${evidencePath}`);
+        // Evidence has to travel with the repository. A file git cannot see
+        // reaches no other clone, so it can back a claim for its author and
+        // nobody else, which is the one thing this level is for.
+        if (!filesGitSees().includes(evidencePath)) {
+            fail(`git does not carry ${evidencePath}: evidence nobody else receives is not evidence`);
+        }
+    }
+    // Who reviewed it is a fact about the person, not the repository or the
+    // image, so it comes from what they brought: REVIEWS_BY first, since a
+    // container usually has no git identity, then git's own.
+    //
+    // git exits non-zero when the key is unset rather than printing nothing, so
+    // the throw has to be caught or the sentence below never runs and the
+    // reviewer is told "Command failed: git config user.name" instead.
+    const configured = () => {
+        try {
+            return git(['config', 'user.name']);
+        } catch {
+            return null;
+        }
+    };
+    const reader = by || process.env.REVIEWS_BY || configured();
+    if (!reader) fail('no reviewer: set REVIEWS_BY or git config user.name, or pass --by NAME');
+
+    // Every path is checked before any record is written: a partly written
+    // command would leave an append-only log holding half of what was asked.
+    for (const file of paths) {
+        if (!fs.existsSync(path.join(REPO, file))) fail(`no such file: ${file}`);
+    }
 
     const date = new Date().toISOString().slice(0, 10);
     for (const file of paths) {
-        if (!fs.existsSync(path.join(REPO, file))) fail(`no such file: ${file}`);
-        // Reading is recorded against a commit, so what was read has to be in
-        // one. A file with uncommitted changes was not read as it now stands.
-        if (git(['status', '--porcelain', '--', file])) {
-            fail(`${file} has uncommitted changes; commit before recording a reading`);
-        }
-        append({ kind: 'review', path: file, commit, by: reader, date });
-        console.log(`${file}: read by ${reader} at ${commit.slice(0, 7)}`);
+        // The blob is what was reviewed, and -w keeps it readable afterwards.
+        // It exists whether or not the file has ever been committed. No commit
+        // is stored: where the content sits is asked afresh at report time.
+        const blob = git(['hash-object', '-w', file]);
+        // The evidence is pinned the same way the reviewed file is, so it names
+        // the version that existed when the review was recorded.
+        const evidence = evidencePath
+            ? { path: evidencePath, blob: git(['hash-object', '-w', evidencePath]) }
+            : undefined;
+        append({ kind: 'review', path: file, blob, by: reader, date, type, evidence });
+        console.log(`${file}: ${type} review by ${reader} (${blob.slice(0, 7)})`
+            + (evidence ? ` per ${evidence.path}` : ''));
     }
 }
 
@@ -161,48 +275,126 @@ function declare(file, origin) {
 function show(onlyStale) {
     const log = readLog();
     const all = rows(log);
+    // Two tallies, not one partition. Review state and origin are independent —
+    // a framework file someone reviewed anyway belongs to both — so counting
+    // every file once would have to drop it from one of them, and it did: the
+    // review won and the framework count went short.
     const counts = {};
-    for (const row of all) counts[row.state] = (counts[row.state] || 0) + 1;
+    const totals = {};
+    const tally = (of, key) => { of[key] = (of[key] || 0) + 1; };
+    for (const row of all) {
+        const key = displayOf(row);
+        if (key !== 'exempt' && key !== 'generated') tally(counts, key);
+        // Origin counts every file that carries it, so the tally matches the
+        // column. The summary reads as a heads-up of what is left to do, so the
+        // number shown is what still wants nothing done — the unreviewed ones —
+        // and the total goes in the line beside it rather than being lost.
+        for (const [origin, entry] of [['framework', 'exempt'], ['generated', 'generated']]) {
+            if (row.origin !== origin) continue;
+            tally(totals, entry);
+            if (key === entry) tally(counts, entry);
+        }
+    }
+    const labelFor = (key, entry) => (totals[key]
+        ? `of ${totals[key]} ${entry.label}`
+        : entry.label);
 
     const wanted = onlyStale
         ? all.filter((row) => row.state === 'unread' || row.state === 'drifted')
         : all;
 
-    const since = (row) => (row.state === 'drifted'
-        ? `${row.reading.commit.slice(0, 7)}, +${row.change[0]} −${row.change[1]} since`
-        : row.state === 'current' ? `${row.reading.commit.slice(0, 7)}, unchanged` : '');
+    // A commit is the only identifier a reader of the committed report can
+    // resolve: GitHub has no route for a blob hash. Where none exists, the row
+    // names nothing rather than offering something unusable.
+    const at = (row) => {
+        const commit = commitFor(blobRead(row.reading));
+        return commit ? `since ${commit.slice(0, 7)}` : 'since it was reviewed';
+    };
+    // What the evidence of a formal review is worth: where it stands itself, and
+    // whether the version named still exists at all.
+    // An evidence artifact can go in two ways, and both leave the review
+    // resting on nothing. The file can be deleted, which is the common one, or
+    // the version pinned can leave the object store while the file stays.
+    // Neither is visible from the mark, so the row has to say it.
+    const per = (row) => {
+        const evidence = row.reading && row.reading.evidence;
+        if (!evidence) return '';
+        const found = all.find((r) => r.file === evidence.path);
+        if (!found) return `, per ${evidence.path} — no longer in the repository`;
+        try {
+            git(['cat-file', '-e', evidence.blob]);
+        } catch {
+            return `, per ${evidence.path} — that version is gone`;
+        }
+        return `, per ${evidence.path} ${iconOf(marksOf(found))}`.trimEnd();
+    };
+    const since = (row) => {
+        if (row.state === 'current') return `unchanged ${at(row)}${per(row)}`;
+        if (row.state !== 'drifted') return '';
+        return row.change === 'gone'
+            ? 'reviewed at a version no longer in the repository'
+            : `+${row.change[0]} −${row.change[1]} ${at(row)}${per(row)}`;
+    };
     const reader = (row) => (row.reading ? `${row.reading.by}, ${row.reading.date}` : '');
 
     if (process.stdout.isTTY) {
-        const width = Math.max(...all.map((row) => row.file.length));
+        const widest = (of) => Math.max(0, ...all.map((row) => of(row).length));
+        const fileWidth = widest((row) => row.file);
+        const readerWidth = widest(reader);
+        const shown = Object.entries(DISPLAY).filter(([key]) => counts[key]);
+        // The table and the legend size themselves separately. --stale lists no
+        // formal review, so its table should not reserve a third icon column
+        // that stays blank; the legend counts every row and so still needs one.
+        // At a terminal the three columns are laid out by hand: each mark takes
+        // its own fixed width, so a blank one leaves a gap of the same size.
+        const marked = (marks) => marks
+            .map((mark) => mark + ' '.repeat(2 - cells(mark)))
+            .join(' ').trimEnd();
+        const iconWidth = 4 * 3 - 1;
+        const padMarks = (marks) => marked(marks) + ' '.repeat(iconWidth - cells(marked(marks)));
         console.log();
         for (const row of wanted) {
-            console.log(`  ${STATES[row.state].icon}  ${row.file.padEnd(width)}  `
-                + `${reader(row).padEnd(24)}${since(row)}`);
+            console.log(`  ${padMarks(marksOf(row))}  ${row.file.padEnd(fileWidth)}  `
+                + `${reader(row).padEnd(readerWidth)}  ${since(row)}`.trimEnd());
         }
         console.log();
-        for (const [state, { icon, label }] of Object.entries(STATES)) {
-            if (counts[state]) console.log(`  ${icon} ${String(counts[state]).padStart(3)}  ${label}`);
+        let origins = false;
+        for (const [key, entry] of shown) {
+            const isOrigin = key === 'exempt' || key === 'generated';
+            // A blank line where the tally changes subject, so the counts are
+            // not read as parts of one whole.
+            if (isOrigin && !origins) { console.log(); origins = true; }
+            const marks = key === 'exempt' ? [ORIGIN_MARKS.framework, '', '', '']
+                : key === 'generated' ? [ORIGIN_MARKS.generated, '', '', '']
+                    : ['', ...entry.marks];
+            console.log(`  ${padMarks(marks)} ${String(counts[key]).padStart(3)}  `
+                + labelFor(key, entry));
         }
         console.log();
         return;
     }
 
-    const lines = ['# Who has read what', ''];
+    const lines = ['# Who has reviewed what', ''];
     const head = headCommit();
     lines.push(head
         ? `*Generated by \`reviews show\` at commit \`${head.slice(0, 7)}\`. `
           + 'Rerun it to bring this up to date.*'
         : '*Generated by `reviews show` before this repository had any commits.*', '');
-    lines.push('| | Files | Meaning |', '| --- | ---: | --- |');
-    for (const [state, { icon, label }] of Object.entries(STATES)) {
-        if (counts[state]) lines.push(`| ${icon} | ${counts[state]} | ${label} |`);
+    lines.push('| | | | | Files | Meaning |', '| --- | --- | --- | --- | ---: | --- |');
+    for (const [key, entry] of Object.entries(DISPLAY)) {
+        if (!counts[key]) continue;
+        const marks = key === 'exempt' ? [ORIGIN_MARKS.framework, '', '', '']
+            : key === 'generated' ? [ORIGIN_MARKS.generated, '', '', '']
+                : ['', ...entry.marks];
+        lines.push(`|${cellsOf(marks)}| ${counts[key]} | ${labelFor(key, entry)} |`);
     }
-    lines.push('', '❌ means no reading has been *recorded*, which is not the same as nobody '
-        + 'having read the file.', '');
-    lines.push('| | File | Read by | Since |', '| --- | --- | --- | --- |');
+    lines.push('', '❌ means no review has been *recorded*, which is not the same as nobody '
+        + 'having reviewed the file.', '');
+    lines.push('| | | | | File | Reviewed by (dates UTC) | Since |',
+        '| --- | --- | --- | --- | --- | --- | --- |');
     for (const row of wanted) {
-        lines.push(`| ${STATES[row.state].icon} | \`${row.file}\` | ${reader(row)} | ${since(row)} |`);
+        lines.push(`|${cellsOf(marksOf(row))}| \`${row.file}\` `
+            + `| ${reader(row)} | ${since(row)} |`);
     }
     process.stdout.write(`${lines.join('\n')}\n`);
 }
@@ -214,17 +406,31 @@ function show(onlyStale) {
 process.on('uncaughtException', (error) => fail(error.message.split('\n')[0]));
 
 const [subcommand, ...rest] = process.argv.slice(2);
-const flag = (name) => {
+const flag = (name, { required = false } = {}) => {
     const at = rest.indexOf(name);
-    return at === -1 ? null : rest.splice(at, 2)[1];
+    if (at === -1) return null;
+    const [, value] = rest.splice(at, 2);
+    if (required && (!value || value.startsWith('-'))) fail(`${name} needs an argument`);
+    return value;
 };
 
 if (subcommand === 'record') {
-    record(rest.filter((a) => !a.startsWith('-')), flag('--by'));
+    // flag() splices its argument out of rest, so it has to run before the
+    // paths are read off; as one call's arguments it would run second.
+    const by = flag('--by');
+    const evidence = flag('--evidence', { required: true });
+    // The default is the weakest claim: the cheapest thing to record has to be
+    // the honest one, or the pressure is to overclaim.
+    const named = TYPES.filter((name) => rest.includes(`--${name}`));
+    if (named.length > 1) fail('give one review type, not two');
+    record(rest.filter((argument) => !argument.startsWith('-')), by,
+        named[0] || 'cursory', evidence);
 } else if (subcommand === 'declare') {
     declare(rest[0], rest[1]);
 } else if (subcommand === 'show') {
     show(rest.includes('--stale'));
 } else {
-    fail('usage: reviews record <path>... [--by NAME] | declare <path> <origin> | show [--stale]');
+    fail('usage: reviews record <path>... [--careful | --formal]'
+        + ' [--evidence <artifact>] [--by NAME]'
+        + ' | declare <path> <origin> | show [--stale]');
 }

@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+#
+# Run reviews inside this REPRO with the arguments given, so that
+#
+#     ./reviews record --careful exports/reviews
+#
+# does from the host what the command does inside a session.
+#
+set -uo pipefail
+cd "$(dirname "$0")"
+
+# Drop make's own failure line
+make --no-print-directory reviews ARGS="$(printf '%q ' "$@")" \
+    2> >(grep -v '^make: \*\*\* \[' >&2)
+exit ${PIPESTATUS[0]}

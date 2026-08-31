@@ -34,9 +34,10 @@ The report gives each mark a column of its own: whose file it is, then whether a
 
 | | | | | | Description |
 |---|---|---|---|---|---|
-| ⚙️ |  |  |  | **framework** | Came with the framework; not ours to review. |
+| ⚙️ |  |  |  | **vendor** | Copied in unaltered from elsewhere; not ours to review. |
 | 🛠️ |  |  |  | **generated** | Produced by something else; review its generator instead. |
 |  ✍️ |  | 🟢 |  | **human** | Written by a person; reviewed by definition. |
+|  ✍️ | 👀 | ✅ |  | **human**, read | Written by a person, and read by one. A glance counts as careful. |
 |  | 👀 |  |  | **cursory** | File eyeballed. No claim that it is correct. |
 |  | 👀 | ✅ |  | **careful** | File read through and judged likely correct by the reader. |
 |  | 👀 | ✅ | 🔬 | **formal** | File inspected via a defined protocol, and the review names the artifact recording its conclusion. |

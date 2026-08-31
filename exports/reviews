@@ -21,12 +21,12 @@ const path = require('path');
 // at the verdict and every verdict — ✅ ❌ ⚠️ — reads down one column.
 //
 // Origin holds a column of its own because it answers a different question. It
-// used to occupy the verdict column, where a single review of a framework file
+// used to occupy the verdict column, where a single review of a vendored file
 // erased the fact that the file was never ours to review.
 //
 // Markdown gets four table columns and aligns them itself, which is why no
 // filler is needed: every blank is a real empty cell.
-const ORIGIN_MARKS = { framework: '⚙️', generated: '🛠️', human: '✍️', authored: '' };
+const ORIGIN_MARKS = { vendor: '⚙️', generated: '🛠️', human: '✍️', authored: '' };
 
 const DISPLAY = {
     'current:cursory': { marks: ['👀', '', ''], label: 'reviewed cursorily, and unchanged since' },
@@ -37,7 +37,7 @@ const DISPLAY = {
     unread: { marks: ['', '❌', ''], label: 'no review recorded' },
     // A file that is not ours wants no reviewer, so it shows its origin and
     // makes no claim in the other three columns.
-    exempt: { marks: ['', '', ''], label: 'framework files unreviewed; not ours to review' },
+    vendor: { marks: ['', '', ''], label: 'vendored files unreviewed; not ours to review' },
     generated: { marks: ['', '', ''], label: 'generated files unreviewed; review the generator' },
     // A file a person wrote wants no reviewer either, but for the opposite
     // reason, so it says so in the verdict column: 🟢 is clear, where ✅ is
@@ -45,22 +45,31 @@ const DISPLAY = {
     human: { marks: ['', '🟢', ''], label: 'written by a person; reviewed by definition' },
 };
 
-// A file a person wrote never wants a reviewer, so its verdict is 🟢 whatever
-// else happens to it: a cursory glance does not make it less settled than it
-// was, and editing it does not make it want re-reading. Only a recorded ✅ says
-// more, and that stands.
 // The level a review still supports. A formal review whose record has gone is
 // a careful one: the reading happened, the protocol may have happened, but
 // nothing a reader can reach says so any more. Everything that shows or counts
 // a review goes through here, so no two parts of the report can disagree.
 const shownKey = (row) => {
     const key = displayOf(row);
-    return key === 'current:formal' && row.lost ? 'current:careful' : key;
+    if (key === 'current:formal' && row.lost) return 'current:careful';
+    // A glance is not what makes a file a person wrote clear — the person who
+    // wrote it is, and it was clear before anyone looked. So a cursory review
+    // of one lands at careful rather than below it, and its 👀 ✅ is the line
+    // the summary counts it on. A formal review still stands as formal: it
+    // names a record, which is more than the declaration ever said.
+    if (row.origin === 'human' && row.state === 'current' && key !== 'current:formal') {
+        return 'current:careful';
+    }
+    return key;
 };
 
+// A file a person wrote never wants a reviewer, so 🟢 stands until somebody
+// reads it: editing one does not make it want re-reading, and a review that has
+// drifted leaves it exactly as settled as it was. A current review says more
+// than the origin does, and shownKey has already put its ✅ in the column.
 const marksOf = (row) => {
     const marks = [ORIGIN_MARKS[row.origin] || '', ...DISPLAY[shownKey(row)].marks];
-    if (row.origin === 'human' && marks[2] !== '✅') marks[2] = '🟢';
+    if (row.origin === 'human' && row.state !== 'current') marks[2] = '🟢';
     return marks;
 };
 
@@ -85,7 +94,10 @@ const displayOf = (row) => (row.state === 'current'
 const cells = (icon) => [...new Intl.Segmenter().segment(icon)]
     .reduce((n, { segment }) => n + (/\p{Extended_Pictographic}/u.test(segment) ? 2 : 1), 0);
 
-const ORIGINS = ['authored', 'generated', 'framework', 'human'];
+// vendor is content copied in unaltered from elsewhere — a framework's own
+// files, a pinned ontology, a vendored schema. What guards such a file is the
+// hash beside it, not a reading: on a byte copy an edit is a defect.
+const ORIGINS = ['authored', 'generated', 'vendor', 'human'];
 const TYPES = ['cursory', 'careful', 'formal'];
 
 function fail(message) {
@@ -231,7 +243,7 @@ function statusOf(file, log) {
     if (!reading) {
         // Origin decides only whether a reviewer is wanted, never what a review
         // said; it keeps its own column either way.
-        if (origin === 'framework') return { state: 'exempt', origin };
+        if (origin === 'vendor') return { state: 'vendor', origin };
         if (origin === 'generated') return { state: 'generated', origin, declared };
         if (origin === 'human') return { state: 'human', origin, declared };
         return { state: 'unread', origin };
@@ -342,28 +354,27 @@ function show(onlyStale) {
     const log = readLog();
     const all = rows(log);
     // Two tallies, not one partition. Review state and origin are independent —
-    // a framework file someone reviewed anyway belongs to both — so counting
+    // a vendored file someone reviewed anyway belongs to both — so counting
     // every file once would have to drop it from one of them, and it did: the
-    // review won and the framework count went short.
+    // review won and the vendor count went short.
     const counts = {};
     const totals = {};
     const tally = (of, key) => { of[key] = (of[key] || 0) + 1; };
-    // The summary counts what the row shows, so the two cannot disagree. A
-    // human-written file counts as human unless a recorded review says more,
-    // exactly as its verdict mark does.
+    // The summary counts what the row shows, so the two cannot disagree: a
+    // human-written file counts as human exactly while its verdict mark is 🟢,
+    // and counts with the reviewed once somebody has read it.
     const countKey = (row) => {
         const key = shownKey(row);
-        if (row.origin !== 'human') return key;
-        return marksOf(row)[2] === '✅' ? key : 'human';
+        return marksOf(row)[2] === '🟢' ? 'human' : key;
     };
     for (const row of all) {
         const key = countKey(row);
-        if (!['exempt', 'generated'].includes(key)) tally(counts, key);
+        if (!['vendor', 'generated'].includes(key)) tally(counts, key);
         // Origin counts every file that carries it, so the tally matches the
         // column. The summary reads as a heads-up of what is left to do, so the
         // number shown is what still wants nothing done — the unreviewed ones —
         // and the total goes in the line beside it rather than being lost.
-        for (const [state, origin] of [['exempt', 'framework'], ['generated', 'generated']]) {
+        for (const [state, origin] of [['vendor', 'vendor'], ['generated', 'generated']]) {
             if (row.origin !== origin) continue;
             tally(totals, state);
             if (key === state) tally(counts, state);
@@ -373,8 +384,10 @@ function show(onlyStale) {
         ? `of ${totals[key]} ${entry.label}`
         : entry.label);
 
+    // What wants a reviewer is what the verdict column says wants one, so a
+    // human file stays off this list however much it has been edited.
     const wanted = onlyStale
-        ? all.filter((row) => row.state === 'unread' || row.state === 'drifted')
+        ? all.filter((row) => ['unread', 'drifted'].includes(countKey(row)))
         : all;
 
     // A commit is the only identifier a reader of the committed report can
@@ -411,7 +424,7 @@ function show(onlyStale) {
     const reader = (row) => (row.reading ? `${row.reading.by}, ${row.reading.date}` : '');
 
     const shown = Object.entries(DISPLAY).filter(([key]) => counts[key]);
-    const ORIGIN_OF_STATE = { exempt: 'framework', generated: 'generated', human: 'human' };
+    const ORIGIN_OF_STATE = { vendor: 'vendor', generated: 'generated', human: 'human' };
     const legendMarks = (key, entry) => (ORIGIN_OF_STATE[key]
         ? [ORIGIN_MARKS[ORIGIN_OF_STATE[key]], ...entry.marks]
         : ['', ...entry.marks]);
@@ -423,6 +436,11 @@ function show(onlyStale) {
     ]);
     const used = keep(columns);
 
+    // The two renderings put the summary at opposite ends for the same reason.
+    // A terminal scrolls, so what is on screen when the prompt returns is the
+    // last thing printed and the file list has gone by; a file does not, so
+    // what is on screen is the first. Either way the summary is where the eye
+    // lands and the list is what a reader scrolls to.
     if (process.stdout.isTTY) {
         const widest = (of) => Math.max(0, ...all.map((row) => of(row).length));
         const fileWidth = widest((row) => row.file);
@@ -445,7 +463,7 @@ function show(onlyStale) {
         console.log();
         let origins = false;
         for (const [key, entry] of shown) {
-            const isOrigin = key === 'exempt' || key === 'generated';
+            const isOrigin = key === 'vendor' || key === 'generated';
             // A blank line where the tally changes subject, so the counts are
             // not read as parts of one whole.
             if (isOrigin && !origins) { console.log(); origins = true; }
@@ -460,16 +478,29 @@ function show(onlyStale) {
     const lines = ['# Repository review status', ''];
     const head = headCommit();
     lines.push(head
-        ? `*Generated by \`reviews show\` at commit \`${head.slice(0, 7)}\`. `
+        // "at commit" invited the reading that this file lives in that commit.
+        // It does not: committing the report moves HEAD, so the commit carrying
+        // it is always the next one. The sha names the state described.
+        ? `*Generated by \`reviews show\` with HEAD at \`${head.slice(0, 7)}\`. `
           + 'Rerun it to bring this up to date.*'
         : '*Generated by `reviews show` before this repository had any commits.*', '');
     const blanks = columns.map(() => '').join(' | ');
     const rules = columns.map(() => '---').join(' | ');
 
-    // The files come first and the legend last, as at a terminal. What a reader
-    // came for is which files want attention; what the marks mean is reference,
-    // and reference belongs under its own heading at the end.
-    //
+    // The summary leads. It is a handful of lines and answers the question a
+    // reader arrives with — how much of this wants attention — where the file
+    // table can run to hundreds of rows and bury it. Under --stale it counts
+    // files the table below deliberately does not list, so it says which
+    // population it is describing.
+    lines.push(onlyStale ? '## Whole repository' : '## Summary', '');
+    lines.push(`| ${blanks} | Files | Meaning |`, `| ${rules} | ---: | --- |`);
+    for (const [key, entry] of shown) {
+        lines.push(`|${cellsOf(used(legendMarks(key, entry)))}| ${counts[key]} `
+            + `| ${labelFor(key, entry)} |`);
+    }
+    lines.push('', '❌ means no review has been *recorded*, which is not the same as nobody '
+        + 'having reviewed the file.', '');
+
     // --stale lists a subset, so the heading says which list this is rather
     // than claiming every file in either case.
     lines.push(onlyStale ? '## Files wanting a reviewer' : '## All files', '');
@@ -479,14 +510,6 @@ function show(onlyStale) {
         lines.push(`|${cellsOf(used(marksOf(row)))}| \`${row.file}\` `
             + `| ${reader(row)} | ${since(row)} |`);
     }
-    lines.push('', '## Summary', '');
-    lines.push(`| ${blanks} | Files | Meaning |`, `| ${rules} | ---: | --- |`);
-    for (const [key, entry] of shown) {
-        lines.push(`|${cellsOf(used(legendMarks(key, entry)))}| ${counts[key]} `
-            + `| ${labelFor(key, entry)} |`);
-    }
-    lines.push('', '❌ means no review has been *recorded*, which is not the same as nobody '
-        + 'having reviewed the file.');
     process.stdout.write(`${lines.join('\n')}\n`);
 }
 

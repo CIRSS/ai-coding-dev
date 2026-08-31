@@ -312,7 +312,7 @@ describe('reviews', function () {
 
     it('carries an origin declaration across a rename', function () {
         const dir = repository([{ 'a.txt': 'one\n' }]);
-        reviews(dir, ['declare', 'a.txt', 'framework']);
+        reviews(dir, ['declare', 'a.txt', 'vendor']);
         move(dir, 'a.txt', 'moved.txt');
         const { stdout } = reviews(dir, ['show']);
         assert.match(stdout, /\| ⚙️ \|[\s|]*`moved\.txt`/);
@@ -375,9 +375,9 @@ describe('reviews', function () {
         assert.match(stdout, /Someone Else/);
     });
 
-    it('exempts a file declared as framework', function () {
+    it('exempts a file declared as vendor', function () {
         const dir = repository([{ 'a.txt': 'one\n' }]);
-        reviews(dir, ['declare', 'a.txt', 'framework']);
+        reviews(dir, ['declare', 'a.txt', 'vendor']);
         const { stdout } = reviews(dir, ['show']);
         assert.match(stdout, /\| ⚙️ \|[\s|]*`a\.txt`/);
     });
@@ -389,9 +389,9 @@ describe('reviews', function () {
         assert.match(stdout, /\| 🛠️ \|[\s|]*`a\.txt`/);
     });
 
-    it('keeps the origin when someone reviews a framework file anyway', function () {
+    it('keeps the origin when someone reviews a vendored file anyway', function () {
         const dir = repository([{ 'a.txt': 'one\n' }]);
-        reviews(dir, ['declare', 'a.txt', 'framework']);
+        reviews(dir, ['declare', 'a.txt', 'vendor']);
         reviews(dir, ['record', 'a.txt']);
         const { stdout } = reviews(dir, ['show']);
         assert.match(stdout, /\| ⚙️ \| 👀 \|[\s|]*`a\.txt`/,
@@ -400,14 +400,14 @@ describe('reviews', function () {
 
     it('counts a reviewed framework file in both tallies', function () {
         const dir = repository([{ 'a.txt': 'one\n', 'b.txt': 'two\n' }]);
-        reviews(dir, ['declare', 'a.txt', 'framework']);
+        reviews(dir, ['declare', 'a.txt', 'vendor']);
         reviews(dir, ['record', 'a.txt']);
-        reviews(dir, ['declare', 'b.txt', 'framework']);
+        reviews(dir, ['declare', 'b.txt', 'vendor']);
         const summary = reviews(dir, ['show']).stdout.split('❌ means')[0];
         // Review state and origin are independent, so a file that is both is
-        // counted in each; counting it once dropped it from the framework tally.
+        // counted in each; counting it once dropped it from the vendor tally.
         // The origin line shows what is left undone, of how many there are.
-        assert.match(summary, /\| ⚙️ \|[\s|]*1 \| of 2 framework files unreviewed/);
+        assert.match(summary, /\| ⚙️ \|[\s|]*1 \| of 2 vendored files unreviewed/);
         assert.match(summary, /\| 👀 \|[\s|]*1 \| reviewed cursorily/);
     });
 
@@ -423,23 +423,39 @@ describe('reviews', function () {
         assert.match(stdout, /written by a person; reviewed by definition/);
     });
 
-    it('keeps a human file clear through a glance and an edit', function () {
+    it('turns the circle into a check when someone reads a human file', function () {
         const dir = repository([{ 'a.txt': 'one\n' }]);
         reviews(dir, ['declare', 'a.txt', 'human']);
 
         reviews(dir, ['record', 'a.txt']);
-        // A glance must not leave the row looking less settled than before it.
-        assert.match(reviews(dir, ['show']).stdout, /\| ✍️ \| 👀 \| 🟢 \|/);
-
-        reviews(dir, ['record', 'a.txt', '--careful']);
-        // A recorded careful review says more than the declaration, so it wins.
-        assert.match(reviews(dir, ['show']).stdout, /\| ✍️ \| 👀 \| ✅ \|/);
+        // 🟢 is clear because a person wrote it; ✅ is clear because a person
+        // read it. Reading says the more of the two, so the check takes over
+        // and the eyeballs stand in front of it. A glance counts as careful
+        // here, so the row and the line counting it show the same marks.
+        const glanced = reviews(dir, ['show']).stdout;
+        assert.match(glanced, /\| ✍️ \| 👀 \| ✅ \|[\s|]*`a\.txt`/);
+        assert.match(glanced, /\|[\s|]*👀 \| ✅ \|[\s|]*1 \| reviewed carefully/);
+        assert.doesNotMatch(glanced, /reviewed cursorily/);
 
         fs.writeFileSync(path.join(dir, 'a.txt'), 'one\ntwo\n');
-        // Editing a file a person writes does not make it want re-reading.
+        // Editing a file a person writes does not make it want re-reading, so
+        // it falls back to the circle rather than going stale.
         const { stdout } = reviews(dir, ['show']);
         assert.match(stdout, /\| ✍️ \|[\s|]*🟢 \|/);
         assert.doesNotMatch(stdout, /⚠️/);
+    });
+
+    it('leaves an edited human file off the list of what wants a reviewer', function () {
+        const dir = repository([{ 'a.txt': 'one\n', 'b.txt': 'two\n' }]);
+        reviews(dir, ['declare', 'a.txt', 'human']);
+        reviews(dir, ['record', 'a.txt', '--careful']);
+        fs.writeFileSync(path.join(dir, 'a.txt'), 'one\ntwo\n');
+
+        // --stale asks what wants a reviewer, which is what the verdict column
+        // says wants one. A human file shows 🟢 however much it is edited.
+        const { stdout } = reviews(dir, ['show', '--stale']);
+        assert.doesNotMatch(stdout, /`a\.txt`/);
+        assert.match(stdout, /`b\.txt`/);
     });
 
     it('refuses an origin it does not define', function () {

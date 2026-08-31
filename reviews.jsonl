@@ -1,6 +1,6 @@
-{"kind":"origin","path":"Makefile","origin":"framework"}
-{"kind":"origin","path":"Makefile-tests","origin":"framework"}
-{"kind":"origin","path":".editorconfig","origin":"framework"}
+{"kind":"origin","path":"Makefile","origin":"vendor"}
+{"kind":"origin","path":"Makefile-tests","origin":"vendor"}
+{"kind":"origin","path":".editorconfig","origin":"vendor"}
 {"kind":"origin","path":"REVIEW.md","origin":"generated"}
 {"kind":"review","path":"Dockerfile","commit":"317444e8ef63e36c3eb7faad1228ef5bed95c0f3","by":"Tim McPhillips","date":"2026-08-28"}
 {"kind":"review","path":"repro-config","commit":"317444e8ef63e36c3eb7faad1228ef5bed95c0f3","by":"Tim McPhillips","date":"2026-08-28"}

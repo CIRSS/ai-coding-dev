@@ -14,7 +14,7 @@ reviews record <path>...             record a cursory review of files as they st
     --formal --evidence <artifact>   record a formal one; it must name its record
     --evidence <artifact>            name what records the review
     --by NAME                        credit someone other than yourself
-reviews declare <path> <origin>      authored | generated | framework | human
+reviews declare <path> <origin>      authored | generated | vendor | human
 reviews show                         the report
     --stale                          only the files that want a reviewer
 ```
@@ -40,12 +40,14 @@ Files that currently need at least a minimal review of their current contents ar
 Files not requiring review in a particular repository are indicated as follows:
 
 ```
-⚙️           framework files unreviewed; not ours to review
+⚙️           vendored files unreviewed; not ours to review
 🛠️           generated files unreviewed; review the generator
 ✍️     🟢    written by a person; reviewed by definition
 ```
 
-The first three columns record what somebody did. 🟢 is the exception: it says a file needs no attention because a person wrote it, not because anyone reviewed it.
+The first three columns record what somebody did. 🟢 is the exception: it says a file needs no attention because a person wrote it, not because anyone read it.
+
+Reading one turns the circle into a check — 👀 ✅, with ✍️ still in front. A cursory review counts as careful here: the file was clear before anyone looked, so a glance is not what makes it so. Editing one puts the circle back; a file a person writes never wants re-reading, so it does not go ⚠️ and does not appear under `--stale`.
 
 A report summary section serves as a heads-up of reviews currently needed.
 
@@ -54,6 +56,15 @@ A report summary section serves as a heads-up of reviews currently needed.
 `--evidence` names a file in this repository that records the review. It is optional at `cursory` and `careful`, and required at `formal`.
 
 The artifact is a person's record of what they did. Evidence an agent wrote is not evidence: a formal review would then rest on the same thing it exists to check. Declaring it `human` says so.
+
+It may still rest on an agent's work, as long as a person says so in it:
+
+```
+Reviewed and approved the agent-authored review in
+[agent-reviews/review-2026-11-05.md](agent-reviews/review-2026-11-05.md).
+```
+
+That sentence is the point. An agent's review can be relied on; nobody's reliance on it should be silent.
 
 The artifact is pinned by hash, so it names the version that existed when the review was recorded. It must be a file git carries. It can be as small as a sentence and a link; this tool does not follow links.
 

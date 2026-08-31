@@ -60,14 +60,14 @@ describe('reviews', function () {
     it('reports a file nobody has reviewed as unreviewed', function () {
         const dir = repository([{ 'a.txt': 'one\n' }]);
         const { stdout } = reviews(dir, ['show']);
-        assert.match(stdout, /\|\s+\|\s+\| ❌ \|\s+\| `a\.txt`/);
+        assert.match(stdout, /\| ❌ \|[\s|]*`a\.txt`/);
     });
 
     it('reports a file as current when nothing has changed since the review', function () {
         const dir = repository([{ 'a.txt': 'one\n' }]);
         reviews(dir, ['record', 'a.txt']);
         const { stdout } = reviews(dir, ['show']);
-        assert.match(stdout, /\|\s+\| 👀 \|\s+\|\s+\| `a\.txt` \| A Person/);
+        assert.match(stdout, /\| 👀 \|[\s|]*`a\.txt` \| A Person/);
         assert.match(stdout, /unchanged/);
     });
 
@@ -77,7 +77,7 @@ describe('reviews', function () {
         fs.writeFileSync(path.join(dir, 'a.txt'), 'one\ntwo\nthree\n');
         execFileSync('git', ['commit', '-qam', 'grow'], { cwd: dir });
         const { stdout } = reviews(dir, ['show']);
-        assert.match(stdout, /\|\s+\|\s+\| ⚠️ \|\s+\| `a\.txt`/);
+        assert.match(stdout, /\| ⚠️ \|[\s|]*`a\.txt`/);
         assert.match(stdout, /\+2 −0 since/);
     });
 
@@ -140,13 +140,13 @@ describe('reviews', function () {
         const record = JSON.parse(fs.readFileSync(path.join(dir, 'reviews.jsonl'), 'utf8')
             .split('\n')[0]);
         assert.strictEqual(record.type, 'cursory', 'the cheapest claim must be the weakest');
-        assert.match(reviews(dir, ['show']).stdout, /\|\s+\| 👀 \|\s+\|\s+\| `a\.txt`/);
+        assert.match(reviews(dir, ['show']).stdout, /\| 👀 \|[\s|]*`a\.txt`/);
     });
 
     it('records a careful review when asked for one', function () {
         const dir = repository([{ 'a.txt': 'one\n' }]);
         reviews(dir, ['record', 'a.txt', '--careful']);
-        assert.match(reviews(dir, ['show']).stdout, /\|\s+\| 👀 \| ✅ \|\s+\| `a\.txt`/);
+        assert.match(reviews(dir, ['show']).stdout, /\| 👀 \| ✅ \|[\s|]*`a\.txt`/);
     });
 
     it('records a formal review when asked for one', function () {
@@ -154,7 +154,7 @@ describe('reviews', function () {
         reviews(dir, ['record', 'a.txt', '--formal', '--evidence', 'record.md']);
         const { stdout } = reviews(dir, ['show']);
         // A formal review is a careful one and more, so it keeps the tick.
-        assert.match(stdout, /\|\s+\| 👀 \| ✅ \| 🔬 \| `a\.txt`/);
+        assert.match(stdout, /\| 👀 \| ✅ \| 🔬 \| `a\.txt`/);
         assert.match(stdout, /per record\.md/);
     });
 
@@ -164,7 +164,7 @@ describe('reviews', function () {
             ['record', 'a.txt', '--careful', '--evidence', 'notes.md']);
         assert.strictEqual(exit, 0, 'evidence is optional below formal, not forbidden');
         const { stdout } = reviews(dir, ['show']);
-        assert.match(stdout, /\|\s+\| 👀 \| ✅ \|\s+\| `a\.txt`/);
+        assert.match(stdout, /\| 👀 \| ✅ \|[\s|]*`a\.txt`/);
         assert.match(stdout, /per notes\.md/);
     });
 
@@ -194,13 +194,15 @@ describe('reviews', function () {
         assert.strictEqual(recorded.evidence.blob, pinned);
     });
 
-    it('shows the state of the evidence beside the formal review', function () {
+    it('names the evidence without judging it', function () {
         const dir = repository([{ 'a.txt': 'one\n', 'record.md': 'what we found\n' }]);
         reviews(dir, ['record', 'a.txt', '--formal', '--evidence', 'record.md']);
-        // Nobody has reviewed the record itself, which is worth seeing.
-        assert.match(reviews(dir, ['show']).stdout, /per record\.md ❌/);
-        reviews(dir, ['record', 'record.md', '--careful']);
-        assert.match(reviews(dir, ['show']).stdout, /per record\.md 👀✅/);
+        // An inspection record is written by the person inspecting, so nobody
+        // reviewing it is ordinary and a mark beside it would report a gap
+        // where there is none.
+        const { stdout } = reviews(dir, ['show']);
+        assert.match(stdout, /per record\.md \|/);
+        assert.doesNotMatch(stdout, /per record\.md [👀✅🔬❌⚠️]/);
     });
 
     it('refuses evidence git cannot carry', function () {
@@ -212,15 +214,22 @@ describe('reviews', function () {
         assert.match(stderr, /git does not carry notes\.md/);
     });
 
-    it('says so when the evidence file is gone', function () {
+    it('drops to careful, and says nothing more, when the evidence is gone', function () {
         const dir = repository([{ 'a.txt': 'one\n', 'record.md': 'what we found\n' }]);
         reviews(dir, ['record', 'a.txt', '--formal', '--evidence', 'record.md']);
         execFileSync('git', ['rm', '-q', 'record.md'], { cwd: dir });
         execFileSync('git', ['commit', '-qm', 'drop the record'], { cwd: dir });
         const { stdout } = reviews(dir, ['show']);
-        // The mark stays 🔬 — what is claimed does not change because the
-        // evidence went — so the row has to say the claim now rests on nothing.
-        assert.match(stdout, /per record\.md — no longer in the repository/);
+        // A formal review is one that names the record of itself, so when the
+        // record goes it is a careful review and nothing more is said: the
+        // mark has already fallen, and a path to nothing helps nobody.
+        assert.match(stdout, /\| 👀 \| ✅ \|[\s|]*`a\.txt`/);
+        assert.doesNotMatch(stdout, /🔬/);
+        assert.doesNotMatch(stdout, /record\.md/);
+        // The log still holds what was claimed at the time.
+        const recorded = JSON.parse(fs.readFileSync(path.join(dir, 'reviews.jsonl'), 'utf8')
+            .split('\n')[0]);
+        assert.strictEqual(recorded.type, 'formal');
     });
 
     it('refuses two review types at once', function () {
@@ -239,7 +248,7 @@ describe('reviews', function () {
             `${JSON.stringify({ kind: 'review', path: 'a.txt', blob,
                 by: 'A Person', date: '2026-08-01' })}\n`);
         const { stdout } = reviews(dir, ['show']);
-        assert.match(stdout, /\|\s+\|\s+\| ❔ \|\s+\| `a\.txt`/, 'an absent type is not a cursory claim');
+        assert.match(stdout, /\| ❔ \|[\s|]*`a\.txt`/, 'an absent type is not a cursory claim');
         assert.match(stdout, /type not recorded/);
     });
 
@@ -306,7 +315,7 @@ describe('reviews', function () {
         reviews(dir, ['declare', 'a.txt', 'framework']);
         move(dir, 'a.txt', 'moved.txt');
         const { stdout } = reviews(dir, ['show']);
-        assert.match(stdout, /\| ⚙️ \|\s+\|\s+\|\s+\| `moved\.txt`/);
+        assert.match(stdout, /\| ⚙️ \|[\s|]*`moved\.txt`/);
     });
 
     it('gives a conflicted file one row, not one per stage', function () {
@@ -333,14 +342,14 @@ describe('reviews', function () {
         reviews(dir, ['record', 'a.txt']);
         move(dir, 'a.txt', 'moved.txt');
         const { stdout } = reviews(dir, ['show']);
-        assert.match(stdout, /\|\s+\| 👀 \|\s+\|\s+\| `moved\.txt`/);
+        assert.match(stdout, /\| 👀 \|[\s|]*`moved\.txt`/);
     });
 
     it('records a review of a file that has uncommitted changes', function () {
         const dir = repository([{ 'a.txt': 'one\n' }]);
         fs.writeFileSync(path.join(dir, 'a.txt'), 'edited\n');
         assert.strictEqual(reviews(dir, ['record', 'a.txt']).exit, 0);
-        assert.match(reviews(dir, ['show']).stdout, /\|\s+\| 👀 \|\s+\|\s+\| `a\.txt`/);
+        assert.match(reviews(dir, ['show']).stdout, /\| 👀 \|[\s|]*`a\.txt`/);
     });
 
     it('records a review in a repository with no commits', function () {
@@ -349,7 +358,7 @@ describe('reviews', function () {
         execFileSync('git', ['config', 'user.name', 'A Person'], { cwd: dir });
         fs.writeFileSync(path.join(dir, 'a.txt'), 'one\n');
         assert.strictEqual(reviews(dir, ['record', 'a.txt']).exit, 0);
-        assert.match(reviews(dir, ['show']).stdout, /\|\s+\| 👀 \|.*`a\.txt`.*it was reviewed/);
+        assert.match(reviews(dir, ['show']).stdout, /\| 👀 \|.*`a\.txt`.*it was reviewed/);
     });
 
     it('refuses to record a review of a file that does not exist', function () {
@@ -370,14 +379,14 @@ describe('reviews', function () {
         const dir = repository([{ 'a.txt': 'one\n' }]);
         reviews(dir, ['declare', 'a.txt', 'framework']);
         const { stdout } = reviews(dir, ['show']);
-        assert.match(stdout, /\| ⚙️ \|\s+\|\s+\|\s+\| `a\.txt`/);
+        assert.match(stdout, /\| ⚙️ \|[\s|]*`a\.txt`/);
     });
 
     it('sends a file declared as generated to its generator', function () {
         const dir = repository([{ 'a.txt': 'one\n' }]);
         reviews(dir, ['declare', 'a.txt', 'generated']);
         const { stdout } = reviews(dir, ['show']);
-        assert.match(stdout, /\| 🛠️ \|\s+\|\s+\|\s+\| `a\.txt`/);
+        assert.match(stdout, /\| 🛠️ \|[\s|]*`a\.txt`/);
     });
 
     it('keeps the origin when someone reviews a framework file anyway', function () {
@@ -385,7 +394,7 @@ describe('reviews', function () {
         reviews(dir, ['declare', 'a.txt', 'framework']);
         reviews(dir, ['record', 'a.txt']);
         const { stdout } = reviews(dir, ['show']);
-        assert.match(stdout, /\| ⚙️ \| 👀 \|\s+\|\s+\| `a\.txt`/,
+        assert.match(stdout, /\| ⚙️ \| 👀 \|[\s|]*`a\.txt`/,
             'a review must not erase the fact that the file was never ours to review');
     });
 
@@ -398,8 +407,39 @@ describe('reviews', function () {
         // Review state and origin are independent, so a file that is both is
         // counted in each; counting it once dropped it from the framework tally.
         // The origin line shows what is left undone, of how many there are.
-        assert.match(summary, /\| ⚙️ \|\s*\|\s*\|\s*\| 1 \| of 2 framework files unreviewed/);
-        assert.match(summary, /\|\s*\| 👀 \|\s*\|\s*\| 1 \| reviewed cursorily/);
+        assert.match(summary, /\| ⚙️ \|[\s|]*1 \| of 2 framework files unreviewed/);
+        assert.match(summary, /\| 👀 \|[\s|]*1 \| reviewed cursorily/);
+    });
+
+    it('marks a file declared human as clear without a review', function () {
+        const dir = repository([{ 'a.txt': 'one\n' }]);
+        reviews(dir, ['declare', 'a.txt', 'human']);
+        const { stdout } = reviews(dir, ['show']);
+        // ✍️ says why no review is wanted; 🟢 says the answer to "does this
+        // need attention" is no. Neither is a recorded review, and ✅ would
+        // claim one that no record backs.
+        assert.match(stdout, /\| ✍️ \|[\s|]*🟢 \|[\s|]*`a\.txt`/);
+        assert.doesNotMatch(stdout, /\| ✍️ \|[\s|]*✅/);
+        assert.match(stdout, /written by a person; reviewed by definition/);
+    });
+
+    it('keeps a human file clear through a glance and an edit', function () {
+        const dir = repository([{ 'a.txt': 'one\n' }]);
+        reviews(dir, ['declare', 'a.txt', 'human']);
+
+        reviews(dir, ['record', 'a.txt']);
+        // A glance must not leave the row looking less settled than before it.
+        assert.match(reviews(dir, ['show']).stdout, /\| ✍️ \| 👀 \| 🟢 \|/);
+
+        reviews(dir, ['record', 'a.txt', '--careful']);
+        // A recorded careful review says more than the declaration, so it wins.
+        assert.match(reviews(dir, ['show']).stdout, /\| ✍️ \| 👀 \| ✅ \|/);
+
+        fs.writeFileSync(path.join(dir, 'a.txt'), 'one\ntwo\n');
+        // Editing a file a person writes does not make it want re-reading.
+        const { stdout } = reviews(dir, ['show']);
+        assert.match(stdout, /\| ✍️ \|[\s|]*🟢 \|/);
+        assert.doesNotMatch(stdout, /⚠️/);
     });
 
     it('refuses an origin it does not define', function () {
@@ -407,6 +447,33 @@ describe('reviews', function () {
         const { exit, stderr } = reviews(dir, ['declare', 'a.txt', 'invented']);
         assert.strictEqual(exit, 2);
         assert.match(stderr, /origin must be one of/);
+    });
+
+    it('lists a directory before descending into it', function () {
+        const dir = repository([{
+            'Zebra.txt': 'z\n',
+            'apple.txt': 'a\n',
+            'src/inner.txt': 'i\n',
+            'src/deeper/nested.txt': 'n\n',
+        }]);
+        const listed = reviews(dir, ['show']).stdout
+            .split('\n').map((line) => (line.match(/`([^`]+)`/) || [])[1])
+            .filter((file) => file && file.includes('.txt'));
+        assert.deepStrictEqual(listed, [
+            // Case-insensitive, so apple comes before Zebra; a directory's own
+            // files before its subdirectory trees, at every level.
+            'apple.txt',
+            'Zebra.txt',
+            'src/inner.txt',
+            'src/deeper/nested.txt',
+        ]);
+    });
+
+    it('names the list it is showing', function () {
+        const dir = repository([{ 'a.txt': 'one\n' }]);
+        assert.match(reviews(dir, ['show']).stdout, /## All files/);
+        // --stale shows a subset, so the heading must not claim every file.
+        assert.match(reviews(dir, ['show', '--stale']).stdout, /## Files wanting a reviewer/);
     });
 
     it('lists only what wants a reviewer with --stale', function () {

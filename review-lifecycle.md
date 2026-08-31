@@ -36,6 +36,7 @@ The report gives each mark a column of its own: whose file it is, then whether a
 |---|---|---|---|---|---|
 | ⚙️ |  |  |  | **framework** | Came with the framework; not ours to review. |
 | 🛠️ |  |  |  | **generated** | Produced by something else; review its generator instead. |
+|  ✍️ |  | 🟢 |  | **human** | Written by a person; reviewed by definition. |
 |  | 👀 |  |  | **cursory** | File eyeballed. No claim that it is correct. |
 |  | 👀 | ✅ |  | **careful** | File read through and judged likely correct by the reader. |
 |  | 👀 | ✅ | 🔬 | **formal** | File inspected via a defined protocol, and the review names the artifact recording its conclusion. |

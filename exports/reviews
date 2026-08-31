@@ -26,7 +26,7 @@ const path = require('path');
 //
 // Markdown gets four table columns and aligns them itself, which is why no
 // filler is needed: every blank is a real empty cell.
-const ORIGIN_MARKS = { framework: '⚙️', generated: '🛠️', authored: '' };
+const ORIGIN_MARKS = { framework: '⚙️', generated: '🛠️', human: '✍️', authored: '' };
 
 const DISPLAY = {
     'current:cursory': { marks: ['👀', '', ''], label: 'reviewed cursorily, and unchanged since' },
@@ -39,11 +39,38 @@ const DISPLAY = {
     // makes no claim in the other three columns.
     exempt: { marks: ['', '', ''], label: 'framework files unreviewed; not ours to review' },
     generated: { marks: ['', '', ''], label: 'generated files unreviewed; review the generator' },
+    // A file a person wrote wants no reviewer either, but for the opposite
+    // reason, so it says so in the verdict column: 🟢 is clear, where ✅ is
+    // checked. No review is recorded and none is missing.
+    human: { marks: ['', '🟢', ''], label: 'written by a person; reviewed by definition' },
 };
 
-const marksOf = (row) => [ORIGIN_MARKS[row.origin] || '', ...DISPLAY[displayOf(row)].marks];
+// A file a person wrote never wants a reviewer, so its verdict is 🟢 whatever
+// else happens to it: a cursory glance does not make it less settled than it
+// was, and editing it does not make it want re-reading. Only a recorded ✅ says
+// more, and that stands.
+// The level a review still supports. A formal review whose record has gone is
+// a careful one: the reading happened, the protocol may have happened, but
+// nothing a reader can reach says so any more. Everything that shows or counts
+// a review goes through here, so no two parts of the report can disagree.
+const shownKey = (row) => {
+    const key = displayOf(row);
+    return key === 'current:formal' && row.lost ? 'current:careful' : key;
+};
+
+const marksOf = (row) => {
+    const marks = [ORIGIN_MARKS[row.origin] || '', ...DISPLAY[shownKey(row)].marks];
+    if (row.origin === 'human' && marks[2] !== '✅') marks[2] = '🟢';
+    return marks;
+};
 
 const cellsOf = (marks) => marks.map((mark) => ` ${mark} `).join('|');
+
+// A column no row uses says nothing and costs a visible cell in every line, so
+// it is left out. The columns that remain keep their order and their meaning.
+const usedColumns = (everyMarks) => [0, 1, 2, 3]
+    .filter((column) => everyMarks.some((marks) => marks[column]));
+const keep = (columns) => (marks) => columns.map((column) => marks[column]);
 const iconOf = (marks) => marks.filter(Boolean).join('');
 
 // Every record written since types existed carries one, so an absent type marks
@@ -58,7 +85,7 @@ const displayOf = (row) => (row.state === 'current'
 const cells = (icon) => [...new Intl.Segmenter().segment(icon)]
     .reduce((n, { segment }) => n + (/\p{Extended_Pictographic}/u.test(segment) ? 2 : 1), 0);
 
-const ORIGINS = ['authored', 'generated', 'framework'];
+const ORIGINS = ['authored', 'generated', 'framework', 'human'];
 const TYPES = ['cursory', 'careful', 'formal'];
 
 function fail(message) {
@@ -175,6 +202,22 @@ function blobRead(reading) {
     }
 }
 
+// What became of a review's evidence, or null if it is still there. A formal
+// review is defined as one that names the record of itself, so when that record
+// goes the review no longer meets the definition and the report stops claiming
+// it does. The log still says what was claimed at the time.
+function evidenceLost(reading) {
+    const evidence = reading && reading.evidence;
+    if (!evidence) return null;
+    if (!fs.existsSync(path.join(REPO, evidence.path))) return 'no longer in the repository';
+    try {
+        git(['cat-file', '-e', evidence.blob]);
+    } catch {
+        return 'that version is gone';
+    }
+    return null;
+}
+
 function statusOf(file, log) {
     // Both an origin and a review follow the file across renames. Matching an
     // origin on the exact path alone would silently drop a declaration the
@@ -190,17 +233,40 @@ function statusOf(file, log) {
         // said; it keeps its own column either way.
         if (origin === 'framework') return { state: 'exempt', origin };
         if (origin === 'generated') return { state: 'generated', origin, declared };
+        if (origin === 'human') return { state: 'human', origin, declared };
         return { state: 'unread', origin };
     }
 
+    const lost = evidenceLost(reading);
     const change = changeSince(blobRead(reading), file);
     return change
-        ? { state: 'drifted', origin, reading, change }
-        : { state: 'current', origin, reading };
+        ? { state: 'drifted', origin, reading, change, lost }
+        : { state: 'current', origin, reading, lost };
+}
+
+// Each directory shows its own files first, then its subdirectory trees, so a
+// reader meets a directory's contents before descending. Names are compared
+// without regard to case: GitHub's own listing is case-sensitive and puts every
+// capital above every lowercase name, which reads as arbitrary.
+function byTreeOrder(a, b) {
+    const left = a.split('/');
+    const right = b.split('/');
+    for (let i = 0; i < Math.min(left.length, right.length); i += 1) {
+        const leftEnds = i === left.length - 1;
+        const rightEnds = i === right.length - 1;
+        // Where one path ends and the other goes deeper, the file in this
+        // directory comes before anything inside a subdirectory of it.
+        if (leftEnds !== rightEnds) return leftEnds ? -1 : 1;
+        const here = left[i].toLowerCase();
+        const there = right[i].toLowerCase();
+        if (here !== there) return here < there ? -1 : 1;
+    }
+    return 0;
 }
 
 function rows(log) {
-    return filesGitSees().sort().map((file) => ({ file, ...statusOf(file, log) }));
+    return filesGitSees().sort(byTreeOrder)
+        .map((file) => ({ file, ...statusOf(file, log) }));
 }
 
 // --- subcommands ------------------------------------------------------------
@@ -282,20 +348,28 @@ function show(onlyStale) {
     const counts = {};
     const totals = {};
     const tally = (of, key) => { of[key] = (of[key] || 0) + 1; };
+    // The summary counts what the row shows, so the two cannot disagree. A
+    // human-written file counts as human unless a recorded review says more,
+    // exactly as its verdict mark does.
+    const countKey = (row) => {
+        const key = shownKey(row);
+        if (row.origin !== 'human') return key;
+        return marksOf(row)[2] === '✅' ? key : 'human';
+    };
     for (const row of all) {
-        const key = displayOf(row);
-        if (key !== 'exempt' && key !== 'generated') tally(counts, key);
+        const key = countKey(row);
+        if (!['exempt', 'generated'].includes(key)) tally(counts, key);
         // Origin counts every file that carries it, so the tally matches the
         // column. The summary reads as a heads-up of what is left to do, so the
         // number shown is what still wants nothing done — the unreviewed ones —
         // and the total goes in the line beside it rather than being lost.
-        for (const [origin, entry] of [['framework', 'exempt'], ['generated', 'generated']]) {
+        for (const [state, origin] of [['exempt', 'framework'], ['generated', 'generated']]) {
             if (row.origin !== origin) continue;
-            tally(totals, entry);
-            if (key === entry) tally(counts, entry);
+            tally(totals, state);
+            if (key === state) tally(counts, state);
         }
     }
-    const labelFor = (key, entry) => (totals[key]
+    const labelFor = (key, entry) => (totals[key] && key !== 'human'
         ? `of ${totals[key]} ${entry.label}`
         : entry.label);
 
@@ -312,21 +386,20 @@ function show(onlyStale) {
     };
     // What the evidence of a formal review is worth: where it stands itself, and
     // whether the version named still exists at all.
-    // An evidence artifact can go in two ways, and both leave the review
-    // resting on nothing. The file can be deleted, which is the common one, or
-    // the version pinned can leave the object store while the file stays.
-    // Neither is visible from the mark, so the row has to say it.
+    // Only whether the evidence is still there. Its own review state is not
+    // shown: an inspection record is written by the person doing the inspecting,
+    // so nobody reviewing it is the ordinary case, and a ❌ beside it would
+    // report a gap where there is none.
+    //
+    // It can go two ways, and both leave the review resting on nothing. The
+    // file can be deleted, which is the common one, or the version pinned can
+    // leave the object store while the file stays.
+    // Named only while it is there to be read. Evidence that has gone is not
+    // reported as gone: the mark has already fallen to what the review still
+    // supports, and a path to nothing helps nobody.
     const per = (row) => {
         const evidence = row.reading && row.reading.evidence;
-        if (!evidence) return '';
-        const found = all.find((r) => r.file === evidence.path);
-        if (!found) return `, per ${evidence.path} — no longer in the repository`;
-        try {
-            git(['cat-file', '-e', evidence.blob]);
-        } catch {
-            return `, per ${evidence.path} — that version is gone`;
-        }
-        return `, per ${evidence.path} ${iconOf(marksOf(found))}`.trimEnd();
+        return evidence && !row.lost ? `, per ${evidence.path}` : '';
     };
     const since = (row) => {
         if (row.state === 'current') return `unchanged ${at(row)}${per(row)}`;
@@ -337,20 +410,32 @@ function show(onlyStale) {
     };
     const reader = (row) => (row.reading ? `${row.reading.by}, ${row.reading.date}` : '');
 
+    const shown = Object.entries(DISPLAY).filter(([key]) => counts[key]);
+    const ORIGIN_OF_STATE = { exempt: 'framework', generated: 'generated', human: 'human' };
+    const legendMarks = (key, entry) => (ORIGIN_OF_STATE[key]
+        ? [ORIGIN_MARKS[ORIGIN_OF_STATE[key]], ...entry.marks]
+        : ['', ...entry.marks]);
+    // Both renderings use the same columns, so the two agree about what a
+    // report of this repository looks like.
+    const columns = usedColumns([
+        ...wanted.map(marksOf),
+        ...shown.map(([key, entry]) => legendMarks(key, entry)),
+    ]);
+    const used = keep(columns);
+
     if (process.stdout.isTTY) {
         const widest = (of) => Math.max(0, ...all.map((row) => of(row).length));
         const fileWidth = widest((row) => row.file);
         const readerWidth = widest(reader);
-        const shown = Object.entries(DISPLAY).filter(([key]) => counts[key]);
         // The table and the legend size themselves separately. --stale lists no
         // formal review, so its table should not reserve a third icon column
         // that stays blank; the legend counts every row and so still needs one.
         // At a terminal the three columns are laid out by hand: each mark takes
         // its own fixed width, so a blank one leaves a gap of the same size.
-        const marked = (marks) => marks
+        const marked = (marks) => used(marks)
             .map((mark) => mark + ' '.repeat(2 - cells(mark)))
             .join(' ').trimEnd();
-        const iconWidth = 4 * 3 - 1;
+        const iconWidth = columns.length * 3 - 1;
         const padMarks = (marks) => marked(marks) + ' '.repeat(iconWidth - cells(marked(marks)));
         console.log();
         for (const row of wanted) {
@@ -364,38 +449,44 @@ function show(onlyStale) {
             // A blank line where the tally changes subject, so the counts are
             // not read as parts of one whole.
             if (isOrigin && !origins) { console.log(); origins = true; }
-            const marks = key === 'exempt' ? [ORIGIN_MARKS.framework, '', '', '']
-                : key === 'generated' ? [ORIGIN_MARKS.generated, '', '', '']
-                    : ['', ...entry.marks];
-            console.log(`  ${padMarks(marks)} ${String(counts[key]).padStart(3)}  `
+            console.log(`  ${padMarks(legendMarks(key, entry))} `
+                + `${String(counts[key]).padStart(3)}  `
                 + labelFor(key, entry));
         }
         console.log();
         return;
     }
 
-    const lines = ['# Who has reviewed what', ''];
+    const lines = ['# Repository review status', ''];
     const head = headCommit();
     lines.push(head
         ? `*Generated by \`reviews show\` at commit \`${head.slice(0, 7)}\`. `
           + 'Rerun it to bring this up to date.*'
         : '*Generated by `reviews show` before this repository had any commits.*', '');
-    lines.push('| | | | | Files | Meaning |', '| --- | --- | --- | --- | ---: | --- |');
-    for (const [key, entry] of Object.entries(DISPLAY)) {
-        if (!counts[key]) continue;
-        const marks = key === 'exempt' ? [ORIGIN_MARKS.framework, '', '', '']
-            : key === 'generated' ? [ORIGIN_MARKS.generated, '', '', '']
-                : ['', ...entry.marks];
-        lines.push(`|${cellsOf(marks)}| ${counts[key]} | ${labelFor(key, entry)} |`);
-    }
-    lines.push('', '❌ means no review has been *recorded*, which is not the same as nobody '
-        + 'having reviewed the file.', '');
-    lines.push('| | | | | File | Reviewed by (dates UTC) | Since |',
-        '| --- | --- | --- | --- | --- | --- | --- |');
+    const blanks = columns.map(() => '').join(' | ');
+    const rules = columns.map(() => '---').join(' | ');
+
+    // The files come first and the legend last, as at a terminal. What a reader
+    // came for is which files want attention; what the marks mean is reference,
+    // and reference belongs under its own heading at the end.
+    //
+    // --stale lists a subset, so the heading says which list this is rather
+    // than claiming every file in either case.
+    lines.push(onlyStale ? '## Files wanting a reviewer' : '## All files', '');
+    lines.push(`| ${blanks} | File | Reviewed by (dates UTC) | Since |`,
+        `| ${rules} | --- | --- | --- |`);
     for (const row of wanted) {
-        lines.push(`|${cellsOf(marksOf(row))}| \`${row.file}\` `
+        lines.push(`|${cellsOf(used(marksOf(row)))}| \`${row.file}\` `
             + `| ${reader(row)} | ${since(row)} |`);
     }
+    lines.push('', '## Summary', '');
+    lines.push(`| ${blanks} | Files | Meaning |`, `| ${rules} | ---: | --- |`);
+    for (const [key, entry] of shown) {
+        lines.push(`|${cellsOf(used(legendMarks(key, entry)))}| ${counts[key]} `
+            + `| ${labelFor(key, entry)} |`);
+    }
+    lines.push('', '❌ means no review has been *recorded*, which is not the same as nobody '
+        + 'having reviewed the file.');
     process.stdout.write(`${lines.join('\n')}\n`);
 }
 

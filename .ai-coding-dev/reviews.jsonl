@@ -38,3 +38,10 @@
 {"kind":"review","path":"review-lifecycle.md","blob":"d5506de8c81792df73a95b94d7adaea2589f843b","by":"Timothy McPhillips","date":"2026-08-30","type":"careful"}
 {"kind":"review","path":"review-lifecycle.md","blob":"a354d98795ab8a8512c4f8fdd6250ae72843f73f","by":"Timothy McPhillips","date":"2026-08-30","type":"careful"}
 {"kind":"review","path":"reviews","blob":"14a094429f7919bfe4be770dd2bd264db1c95c8a","by":"Timothy McPhillips","date":"2026-08-30","type":"careful"}
+{"kind":"origin","path":".ai-coding-dev/reviews.jsonl","origin":"generated"}
+{"kind":"review","path":".gitignore","blob":"fab5e185c624c9ffc295355b74ecdefb67f44a7f","by":"Timothy McPhillips","date":"2026-09-02","type":"cursory"}
+{"kind":"review","path":"repro-config","blob":"7570f5d265c5230c632da57b668cb717b48dfd19","by":"Timothy McPhillips","date":"2026-09-02","type":"cursory"}
+{"kind":"review","path":"review-lifecycle.md","blob":"a405dee0e83d9356fd499df8eeda553b7f8423d4","by":"Timothy McPhillips","date":"2026-09-02","type":"careful"}
+{"kind":"review","path":".ai-coding-dev/.gitignore","blob":"6cda48e4fbf81bee4ba03bc055cb760e88addbf2","by":"Timothy McPhillips","date":"2026-09-02","type":"careful"}
+{"kind":"review","path":"exports/host-makefile","blob":"7582a443c949ce37b1fa4c2eda52e3fb4d20ff28","by":"Timothy McPhillips","date":"2026-09-02","type":"careful"}
+{"kind":"review","path":"exports/base-manifest","blob":"3230e071696844b622d3988b3620a5b98e576ec2","by":"Timothy McPhillips","date":"2026-09-02","type":"careful"}

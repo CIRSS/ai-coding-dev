@@ -20,10 +20,5 @@ start:                  start-repro   ## Start an interactive session in this RE
 
 update-reviews:         build-reports ## Rewrite REVIEW.md, then show who has reviewed what.
 
-## reviews:                              Run reviews itself. Prefer ./reviews, which takes its arguments directly.
-ARGS ?=
-.PHONY: reviews
-reviews: session
-	$(RUN_IN_REPRO) 'reviews $(ARGS)'
-
-##
+# Include custom targets provided by ai-coding-dev
+-include .ai-coding-dev/host-makefile

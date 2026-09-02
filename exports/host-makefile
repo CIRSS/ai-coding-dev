@@ -1,0 +1,19 @@
+# Host-side targets for the reviews command. A consuming REPRO opts in with
+#
+#     -include .ai-coding-dev/host-makefile
+#
+# in its repro-config. Use -include: the trim directory does not exist until
+# the REPRO has been started once.
+
+## reviews:           Run reviews, e.g. make reviews -- record --careful FILE.
+.PHONY: reviews
+reviews: session
+	$(RUN_IN_REPRO) 'reviews $(filter-out reviews,$(MAKECMDGOALS))'
+
+# make claims any argument starting with a dash, so a bare -- is needed to end
+# its option parsing. The remaining words then arrive as goals; this absorbs
+# them, and is guarded so a mistyped target still fails everywhere else.
+ifneq (,$(filter reviews,$(MAKECMDGOALS)))
+%:
+	@:
+endif

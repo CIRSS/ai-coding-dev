@@ -8,6 +8,9 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
+// The log's default home: this module's trim directory in the repository.
+const logIn = (dir) => path.join(dir, '.ai-coding-dev', 'reviews.jsonl');
+
 // Builds a repository with one commit per entry of `steps`, each a map of file
 // to content. Returns its path.
 function repository(steps) {
@@ -100,7 +103,7 @@ describe('reviews', function () {
     it('stores no commit, so the report cannot cache a stale one', function () {
         const dir = repository([{ 'a.txt': 'one\n' }]);
         reviews(dir, ['record', 'a.txt']);
-        const record = JSON.parse(fs.readFileSync(path.join(dir, 'reviews.jsonl'), 'utf8')
+        const record = JSON.parse(fs.readFileSync(logIn(dir), 'utf8')
             .split('\n')[0]);
         assert.ok(!record.commit, 'a stored commit is an answer that goes stale');
         assert.ok(record.blob, 'the blob is what identifies the reviewed content');
@@ -137,7 +140,7 @@ describe('reviews', function () {
     it('records a cursory review when no type is given', function () {
         const dir = repository([{ 'a.txt': 'one\n' }]);
         reviews(dir, ['record', 'a.txt']);
-        const record = JSON.parse(fs.readFileSync(path.join(dir, 'reviews.jsonl'), 'utf8')
+        const record = JSON.parse(fs.readFileSync(logIn(dir), 'utf8')
             .split('\n')[0]);
         assert.strictEqual(record.type, 'cursory', 'the cheapest claim must be the weakest');
         assert.match(reviews(dir, ['show']).stdout, /\| 👀 \|[\s|]*`a\.txt`/);
@@ -186,7 +189,7 @@ describe('reviews', function () {
     it('pins the evidence to the version that existed at the time', function () {
         const dir = repository([{ 'a.txt': 'one\n', 'record.md': 'what we found\n' }]);
         reviews(dir, ['record', 'a.txt', '--formal', '--evidence', 'record.md']);
-        const recorded = JSON.parse(fs.readFileSync(path.join(dir, 'reviews.jsonl'), 'utf8')
+        const recorded = JSON.parse(fs.readFileSync(logIn(dir), 'utf8')
             .split('\n')[0]);
         const pinned = execFileSync('git', ['hash-object', 'record.md'],
             { cwd: dir, encoding: 'utf8' }).trim();
@@ -227,7 +230,7 @@ describe('reviews', function () {
         assert.doesNotMatch(stdout, /🔬/);
         assert.doesNotMatch(stdout, /record\.md/);
         // The log still holds what was claimed at the time.
-        const recorded = JSON.parse(fs.readFileSync(path.join(dir, 'reviews.jsonl'), 'utf8')
+        const recorded = JSON.parse(fs.readFileSync(logIn(dir), 'utf8')
             .split('\n')[0]);
         assert.strictEqual(recorded.type, 'formal');
     });
@@ -244,7 +247,8 @@ describe('reviews', function () {
         const dir = repository([{ 'a.txt': 'one\n' }]);
         const blob = execFileSync('git', ['hash-object', '-w', 'a.txt'],
             { cwd: dir, encoding: 'utf8' }).trim();
-        fs.writeFileSync(path.join(dir, 'reviews.jsonl'),
+        fs.mkdirSync(path.dirname(logIn(dir)), { recursive: true });
+        fs.writeFileSync(logIn(dir),
             `${JSON.stringify({ kind: 'review', path: 'a.txt', blob,
                 by: 'A Person', date: '2026-08-01' })}\n`);
         const { stdout } = reviews(dir, ['show']);
@@ -458,6 +462,62 @@ describe('reviews', function () {
         assert.match(stdout, /`b\.txt`/);
     });
 
+    it('refuses to record into a log git cannot see', function () {
+        const dir = repository([{ 'a.txt': 'one\n' }]);
+        fs.writeFileSync(path.join(dir, '.gitignore'), '*.jsonl\n');
+
+        // A log git never sees is a record nobody else will ever read, and the
+        // loss shows up at the first fresh clone, when it is already too late.
+        const { exit, stderr } = reviews(dir, ['record', 'a.txt']);
+        assert.strictEqual(exit, 2);
+        // The message names the pattern responsible, so it can be acted on.
+        assert.match(stderr, /ignored by \.gitignore:1 \(\*\.jsonl\)/);
+        assert.match(stderr, /reviews track/);
+        assert.strictEqual(fs.existsSync(logIn(dir)), false);
+    });
+
+    it('makes an ignored log visible, and stages nothing', function () {
+        const dir = repository([{ 'a.txt': 'one\n' }]);
+        fs.writeFileSync(path.join(dir, '.gitignore'), '*.jsonl\n');
+
+        assert.strictEqual(reviews(dir, ['track']).exit, 0);
+        assert.strictEqual(reviews(dir, ['record', 'a.txt']).exit, 0);
+
+        // Which files go into a commit is the committer's choice, so track
+        // makes the log trackable and leaves the index alone.
+        const staged = execFileSync('git', ['diff', '--cached', '--name-only'],
+            { cwd: dir, encoding: 'utf8' });
+        assert.strictEqual(staged, '');
+    });
+
+    it('reaches a log inside a directory git does not descend into', function () {
+        const dir = repository([{ 'a.txt': 'one\n' }]);
+        fs.writeFileSync(path.join(dir, '.gitignore'), '.*\n!.gitignore\n');
+        fs.mkdirSync(path.join(dir, '.mod'));
+        fs.writeFileSync(path.join(dir, '.mod', '.gitignore'), '*\n');
+        const env = { REVIEWS_LOG: path.join(dir, '.mod', 'reviews.jsonl') };
+
+        // git does not descend into an excluded directory, so a negation for a
+        // file inside one is never read. The directory has to be re-included
+        // first, and the exception list has to except itself or it is never
+        // committed and a fresh clone ignores the log again.
+        assert.strictEqual(reviews(dir, ['track'], env).exit, 0);
+        assert.strictEqual(reviews(dir, ['record', 'a.txt'], env).exit, 0);
+
+        const listed = execFileSync('git',
+            ['ls-files', '--others', '--exclude-standard'], { cwd: dir, encoding: 'utf8' });
+        assert.match(listed, /\.mod\/reviews\.jsonl/);
+        assert.match(listed, /\.mod\/\.gitignore/);
+    });
+
+    it('says a visible log is already visible, and changes nothing', function () {
+        const dir = repository([{ 'a.txt': 'one\n' }]);
+        const { exit, stdout } = reviews(dir, ['track']);
+        assert.strictEqual(exit, 0);
+        assert.match(stdout, /already visible/);
+        assert.strictEqual(fs.existsSync(path.join(dir, '.gitignore')), false);
+    });
+
     it('refuses an origin it does not define', function () {
         const dir = repository([{ 'a.txt': 'one\n' }]);
         const { exit, stderr } = reviews(dir, ['declare', 'a.txt', 'invented']);
@@ -505,7 +565,7 @@ describe('reviews', function () {
         reviews(dir, ['record', 'a.txt']);
         reviews(dir, ['declare', 'a.txt', 'authored']);
         reviews(dir, ['record', 'a.txt', '--by', 'Someone Else']);
-        const lines = fs.readFileSync(path.join(dir, 'reviews.jsonl'), 'utf8')
+        const lines = fs.readFileSync(logIn(dir), 'utf8')
             .split('\n').filter(Boolean);
         assert.strictEqual(lines.length, 3);
         assert.strictEqual(JSON.parse(lines[0]).kind, 'review');
@@ -520,7 +580,7 @@ describe('reviews', function () {
     it('writes nothing when any path in the command is bad', function () {
         const dir = repository([{ 'a.txt': 'one\n' }]);
         assert.strictEqual(reviews(dir, ['record', 'a.txt', 'nope.txt']).exit, 2);
-        assert.ok(!fs.existsSync(path.join(dir, 'reviews.jsonl')),
+        assert.ok(!fs.existsSync(logIn(dir)),
             'a failed command left records behind');
     });
 

@@ -26,26 +26,33 @@ flowchart TD
     style CH fill:#fdf0d0,stroke:#b8860b,color:#4a3a10
 ```
 
-## Marks
+## How changes in review status are reflected in the report
 
-A review can be cursory, careful, or formal. The level of care is recorded as a qualifier on the `Reviewed` state rather than as a state of its own.
+The report excerpts below reflect the changing status of one file, `greeting.txt`, over three transitions in the state diagram.
 
-The report gives each mark a column of its own: whose file it is, then whether anyone looked, what they concluded, and whether a protocol was followed. A review fills the last three from the left, so its strength reads as how far it gets, and everything that is not a review starts at the verdict, where ✅ ❌ ⚠️ line up beneath one another.
+The file starts with no review recorded (state = *Never reviewed*):
 
-| | | | | | Description |
-|---|---|---|---|---|---|
-| ⚙️ |  |  |  | **vendor** | Copied in unaltered from elsewhere; not ours to review. |
-| 🛠️ |  |  |  | **generated** | Produced by something else; review its generator instead. |
-|  ✍️ |  | 🟢 |  | **human** | Written by a person; reviewed by definition. |
-|  ✍️ | 👀 | ✅ |  | **human**, read | Written by a person, and read by one. A glance counts as careful. |
-|  | 👀 |  |  | **cursory** | File eyeballed. No claim that it is correct. |
-|  | 👀 | ✅ |  | **careful** | File read through and judged likely correct by the reader. |
-|  | 👀 | ✅ | 🔬 | **formal** | File inspected via a defined protocol, and the review names the artifact recording its conclusion. |
-|  |  | ⚠️ |  | **changed** | Reviewed earlier; changed since. |
-|  |  | ❌ |  | **unreviewed** | No review recorded. |
+```
+        ❌     greeting.txt
+```
 
-`reviews record` stores `cursory`.  Adding the `--careful` option raises the review type. 
+A careful review is recorded (transition via **`review-never-reviewed`** to state *Reviewed*):
 
-A file that is not ours wants no reviewer, so it shows only its origin. Review one anyway and the origin stays — the marks appear alongside it rather than in place of it, because a cursory look should not erase the fact that the file was never ours to review.
+```
+     👀 ✅     greeting.txt   A Person, 2026-09-02  unchanged since bce72d7
+```
 
-See [`README.md`](README.md) for the commands, the review types in full, and how a formal review names the artifact that records it.
+A line is added, with no new review yet recorded (transition via **`edit-reviewed`** to state *Unreviewed changes*):
+
+```
+        ⚠️     greeting.txt   A Person, 2026-09-02  +1 −0 since bce72d7
+```
+
+The line is taken back out (transition via **`revert-changed`** to state *Reviewed*):
+
+```
+     👀 ✅     greeting.txt   A Person, 2026-09-02  unchanged since bce72d7
+```
+
+
+See [`README.md`](README.md) for the commands, what each icon means, and how a formal review names the artifact that records it.

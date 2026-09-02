@@ -17,6 +17,7 @@ reviews record <path>...             record a cursory review of files as they st
 reviews declare <path> <origin>      authored | generated | vendor | human
 reviews show                         the report
     --stale                          only the files that want a reviewer
+reviews track                        make the log visible to git
 ```
 
 ### Review types
@@ -46,6 +47,8 @@ Files not requiring review in a particular repository are indicated as follows:
 ```
 
 The first three columns record what somebody did. 🟢 is the exception: it says a file needs no attention because a person wrote it, not because anyone read it.
+
+Reviewing a ⚙️ or 🛠️ file anyway keeps its origin — the review's icons appear beside it, not in place of it, since reading a file does not make it ours.
 
 Reading one turns the circle into a check — 👀 ✅, with ✍️ still in front. A cursory review counts as careful here: the file was clear before anyone looked, so a glance is not what makes it so. Editing one puts the circle back; a file a person writes never wants re-reading, so it does not go ⚠️ and does not appear under `--stale`.
 
@@ -101,11 +104,15 @@ REPRO_DOCKER_OPTIONS = --env REVIEWS_BY="$(shell git config user.name)"
 ## In a consuming repository
 
 ```
-reviews.jsonl    the log — append-only, written only by reviews
-REVIEW.md        the report — generated
+.ai-coding-dev/reviews.jsonl    the log — append-only, written only by reviews
+REVIEW.md                       the report — generated
 ```
 
 The log is the only file anyone touches, through `reviews record` and `reviews declare`. Everything else is derived from it and from git.
+
+The report describes only the present, and can afford to because the log holds the past — so a log git never sees is a record nobody else will ever read, and the loss surfaces at the first fresh clone, when it is already gone. `record` and `declare` stop when the log is ignored, naming the pattern responsible. At a terminal they offer to fix it; anywhere else — under make, in a script, in CI — they refuse and say what to run, since a question nobody can answer is worse than a message. `reviews track` writes the exception and verifies it took. It never stages anything: what goes into a commit is the committer's to choose.
+
+`REVIEWS_LOG` sets where the log is kept. A consuming REPRO declares it in its Dockerfile with `repro.env`; unset, the log is `.ai-coding-dev/reviews.jsonl`.
 
 Records are one JSON object per line:
 
@@ -133,6 +140,14 @@ Two profiles beyond the base:
 --code      adds make test-code, for a repository running Mocha
 ```
 
+To get `make reviews` as well, add one line to the consuming REPRO's `repro-config`:
+
+```make
+-include .ai-coding-dev/host-makefile
+```
+
+`-include`, not `include`: the trim directory is written when the REPRO starts, so a fresh clone has to be able to build without it.
+
 `REVIEWS_REPORT` defaults to `REVIEW.md` at the root of the consuming REPRO and can be overridden with `repro.env`. `REVIEWS_LOG` and `REVIEWS_BY` are not declared: the log belongs to whichever repository the command runs in, and the reviewer to the session.
 
 ## Build and test
@@ -142,21 +157,20 @@ make build-parent
 make build-image
 make test-code
 make build-reports     rewrite REVIEW.md and show who has reviewed what
-make reviews           run reviews itself, without opening a session
 ```
 
 `build-reports` comes from the `--report` profile, so every consuming REPRO has it. `repro-config` here also names it `update-reviews`.
 
 ## Running it from the host
 
-`./reviews` takes the arguments the command itself takes, and runs it in the REPRO:
-
 ```
-./reviews show                               the report
-./reviews show --stale                       only what wants a reviewer
-./reviews record --careful exports/reviews   record a review
+make reviews -- show                               the report
+make reviews -- show --stale                       only what wants a reviewer
+make reviews -- record --careful exports/reviews   record a review
 ```
 
-No arguments prints the usage. The reviewer comes from `REVIEWS_BY`, so no `--by` is needed, and the tool's exit status is the wrapper's.
+Everything after `--` reaches the command. The `--` is needed because make claims any argument beginning with a dash as one of its own options, and would reject `--careful` before the recipe ran.
 
-It is a wrapper rather than a make target because make parses anything beginning with a dash as one of its own options, so `--careful` would never reach the tool. The `reviews` target underneath takes `ARGS="..."` instead.
+Each invocation starts a fresh container from the current image, so a rebuild takes effect immediately. A long-running session does not: it keeps the tool it started with, and a review recorded there is written by that older copy into a log that is append-only.
+
+No arguments prints the usage. The reviewer comes from `REVIEWS_BY`, so no `--by` is needed, and the command's exit status is make's.

@@ -45,3 +45,6 @@
 {"kind":"review","path":".ai-coding-dev/.gitignore","blob":"6cda48e4fbf81bee4ba03bc055cb760e88addbf2","by":"Timothy McPhillips","date":"2026-09-02","type":"careful"}
 {"kind":"review","path":"exports/host-makefile","blob":"7582a443c949ce37b1fa4c2eda52e3fb4d20ff28","by":"Timothy McPhillips","date":"2026-09-02","type":"careful"}
 {"kind":"review","path":"exports/base-manifest","blob":"3230e071696844b622d3988b3620a5b98e576ec2","by":"Timothy McPhillips","date":"2026-09-02","type":"careful"}
+{"kind":"review","path":"exports/agents.md","blob":"62e32162bd46e00247127f1a0afefbee8601e7d3","by":"Timothy McPhillips","date":"2026-09-02","type":"careful"}
+{"kind":"review","path":"exports/trim-manifest","blob":"ef87c333203600191d4c678b047e7ceb3c7d2b44","by":"Timothy McPhillips","date":"2026-09-02","type":"careful"}
+{"kind":"review","path":"exports/base-manifest","blob":"7db8f804e8b5b5e4c2bd098c0768d9ed4cd3815e","by":"Timothy McPhillips","date":"2026-09-02","type":"careful"}

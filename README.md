@@ -150,6 +150,12 @@ To get `make reviews` as well, add one line to the consuming REPRO's `repro-conf
 
 `REVIEWS_REPORT` defaults to `REVIEW.md` at the root of the consuming REPRO and can be overridden with `repro.env`. `REVIEWS_LOG` and `REVIEWS_BY` are not declared: the log belongs to whichever repository the command runs in, and the reviewer to the session.
 
+## Instructions for agents
+
+`exports/agents.md` states the workflow the tool assumes and how a coding agent should behave in a repository that uses it — chiefly that recording a review is a person's act, and that an agent reading a file is not one. It is delivered to `.ai-coding-dev/agents.md`, so a consuming project's own agent instructions can point at it in a line and add whatever else that project needs.
+
+Like everything else in the trim directory it arrives at the first session start, and a later version of it does not replace a copy already there.
+
 ## Build and test
 
 ```

@@ -5,6 +5,13 @@
 # in its repro-config. Use -include: the trim directory does not exist until
 # the REPRO has been started once.
 
+# Carry the host's git identity in as the reviewer. A container has no git
+# identity of its own, and who reviewed a file is a fact about the person at
+# the keyboard, not about the image. Append rather than assign: the consuming
+# REPRO may have set docker options of its own. An unset user.name yields an
+# empty value, which reviews treats as no reviewer rather than as one.
+REPRO_DOCKER_OPTIONS += --env REVIEWS_BY="$(shell git config user.name)"
+
 ## reviews:           Run reviews, e.g. make reviews -- record --careful FILE.
 .PHONY: reviews
 reviews: session

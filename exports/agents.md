@@ -40,6 +40,8 @@ Declaring `authored` on a file with no declaration records nothing, since that i
 
 **Report what you changed.** After writing or editing files, run `reviews show --stale` and say which of them nobody has read. Code an agent wrote and nobody has checked is exactly what this repository is keeping track of.
 
+A count of ❌ is never a reason to wait. Work nobody has read can be committed and pushed honestly, because the report travels in the same commit and says exactly which files those are — that is what the report is for. What is not honest is a report that disagrees with the commit carrying it. So when a commit comes into view, offer to regenerate the report; do not wait to be asked, and do not present the unreviewed count as something to clear first.
+
 ## Running it
 
 ```

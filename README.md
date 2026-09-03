@@ -150,7 +150,7 @@ This is part of adopting the module rather than an extra. It provides `make revi
 
 `-include`, not `include`: the trim directory is written when the REPRO starts, so a fresh clone has to be able to build without it.
 
-**Upgrading.** `make build-image` will not pick up a new version of the module: `repro.require` runs in a cached layer, and nothing reports the miss. Use `make rebuild-image`. A repository that already has a `REVIEW.md` should `git mv REVIEW.md REVIEWS.md`, or the old one stays behind, stale.
+**Upgrading.** `make build-image` will not pick up a new version of the module: `repro.require` runs in a cached layer, and nothing reports the miss. Use `make rebuild-image`, then `make reset-repro` — an existing trim file is not replaced either. A repository that already has a `REVIEW.md` should `git mv REVIEW.md REVIEWS.md`, or the old one stays behind, stale.
 
 `REVIEWS_REPORT` defaults to `REVIEWS.md` at the root of the consuming REPRO and can be overridden with `repro.env`. `REVIEWS_LOG` and `REVIEWS_BY` are not declared: the log belongs to whichever repository the command runs in, and the reviewer to the session.
 

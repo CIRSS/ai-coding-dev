@@ -10,11 +10,6 @@ PARENT_IMAGE=${REPRO_DOCKER_ORG}/${REPRO_NAME}-parent:latest
 
 DOCKER_BUILD_PROGRESS=plain
 
-# Carry the host's git identity in as the reviewer. A container has no git
-# identity of its own, and who reviewed a file is a fact about the person at
-# the keyboard, not about the image.
-REPRO_DOCKER_OPTIONS = --env REVIEWS_BY="$(shell git config user.name)"
-
 image:                  build-image   ## Build this REPRO's image.
 start:                  start-repro   ## Start an interactive session in this REPRO.
 

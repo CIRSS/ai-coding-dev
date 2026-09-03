@@ -4,7 +4,7 @@ For coding agents in a repository that uses the `ai-coding-dev` module. Point yo
 
 ## The workflow this tool assumes
 
-Someone writes code; a person reads it and says so. `reviews` records the second part — who read which version of which file, and how closely — and `REVIEW.md` reports what that leaves outstanding.
+Someone writes code; a person reads it and says so. `reviews` records the second part — who read which version of which file, and how closely — and `REVIEWS.md` reports what that leaves outstanding.
 
 Every entry in the log names a person who actually looked. That is the whole of its value, and an entry for a reading that did not happen destroys it.
 
@@ -20,11 +20,11 @@ What you must never do is decide on their behalf that something has been reviewe
 
 **`reviews declare` is yours to run.** An origin says where a file's content came from — a checkable fact, not a claim about anyone's attention — so unlike `record`, establishing one is ordinary work you do without being asked. `vendor` is content copied in unaltered, `generated` what a program produced, `human` what a person wrote by hand, and `authored` — the default — code written for this repository.
 
-Declare as soon as a file lands. The case you will meet most often is one you copied in from elsewhere, such as framework files vendored into the repo; left undeclared it shows as ❌ in `REVIEW.md`, which reads as *nobody has reviewed this* when the truth is *nobody here should*.
+Declare as soon as a file lands. The case you will meet most often is one you copied in from elsewhere, such as framework files vendored into the repo; left undeclared it shows as ❌ in `REVIEWS.md`, which reads as *nobody has reviewed this* when the truth is *nobody here should*.
 
 ```
 make reviews -- declare Makefile vendor
-make reviews -- declare REVIEW.md generated
+make reviews -- declare REVIEWS.md generated
 ```
 
 The two files this module puts in `.ai-coding-dev/` have the same answer in every repository, so declare them rather than working it out again: `.gitignore` is `vendor` — it arrived from outside unaltered and is not this repository's to change — and `reviews.jsonl` is `generated`, being the log this program writes. Left undeclared, a log whose entire content is review records reads as *nobody has reviewed this*.

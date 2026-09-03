@@ -18,7 +18,7 @@ REPRO_DOCKER_OPTIONS = --env REVIEWS_BY="$(shell git config user.name)"
 image:                  build-image   ## Build this REPRO's image.
 start:                  start-repro   ## Start an interactive session in this REPRO.
 
-update-reviews:         build-reports ## Rewrite REVIEW.md, then show who has reviewed what.
+update-reviews:         build-reports ## Rewrite REVIEWS.md, then show who has reviewed what.
 
 # Include custom targets provided by ai-coding-dev
 -include .ai-coding-dev/host-makefile

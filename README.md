@@ -105,7 +105,7 @@ REPRO_DOCKER_OPTIONS = --env REVIEWS_BY="$(shell git config user.name)"
 
 ```
 .ai-coding-dev/reviews.jsonl    the log — append-only, written only by reviews
-REVIEW.md                       the report — generated
+REVIEWS.md                      the report — generated
 ```
 
 The log is the only file anyone touches, through `reviews record` and `reviews declare`. Everything else is derived from it and from git.
@@ -150,9 +150,9 @@ This is part of adopting the module rather than an extra. It provides `make revi
 
 `-include`, not `include`: the trim directory is written when the REPRO starts, so a fresh clone has to be able to build without it.
 
-**Upgrading.** `make build-image` will not pick up a new version of the module: `repro.require` runs in a cached layer, and nothing reports the miss. Use `make rebuild-image`.
+**Upgrading.** `make build-image` will not pick up a new version of the module: `repro.require` runs in a cached layer, and nothing reports the miss. Use `make rebuild-image`. A repository that already has a `REVIEW.md` should `git mv REVIEW.md REVIEWS.md`, or the old one stays behind, stale.
 
-`REVIEWS_REPORT` defaults to `REVIEW.md` at the root of the consuming REPRO and can be overridden with `repro.env`. `REVIEWS_LOG` and `REVIEWS_BY` are not declared: the log belongs to whichever repository the command runs in, and the reviewer to the session.
+`REVIEWS_REPORT` defaults to `REVIEWS.md` at the root of the consuming REPRO and can be overridden with `repro.env`. `REVIEWS_LOG` and `REVIEWS_BY` are not declared: the log belongs to whichever repository the command runs in, and the reviewer to the session.
 
 ## Instructions for agents
 
@@ -166,7 +166,7 @@ Like everything else in the trim directory it arrives at the first session start
 make build-parent
 make build-image
 make test-code
-make build-reports     rewrite REVIEW.md and show who has reviewed what
+make build-reports     rewrite REVIEWS.md and show who has reviewed what
 ```
 
 `build-reports` comes from the `--report` profile, so every consuming REPRO has it. `repro-config` here also names it `update-reviews`.

@@ -49,3 +49,4 @@
 {"kind":"review","path":"exports/trim-manifest","blob":"ef87c333203600191d4c678b047e7ceb3c7d2b44","by":"Timothy McPhillips","date":"2026-09-02","type":"careful"}
 {"kind":"review","path":"exports/base-manifest","blob":"7db8f804e8b5b5e4c2bd098c0768d9ed4cd3815e","by":"Timothy McPhillips","date":"2026-09-02","type":"careful"}
 {"kind":"review","path":"exports/agents.md","blob":"a42435a7e7b79a738b3cc804488e9d6aae9d9ce9","by":"Timothy McPhillips","date":"2026-09-03","type":"careful"}
+{"kind":"origin","path":"REVIEWS.md","origin":"generated"}

@@ -140,13 +140,17 @@ Two profiles beyond the base:
 --code      adds make test-code, for a repository running Mocha
 ```
 
-To get `make reviews` as well, add one line to the consuming REPRO's `repro-config`:
+Add one line to the consuming REPRO's `repro-config`:
 
 ```make
 -include .ai-coding-dev/host-makefile
 ```
 
+This is part of adopting the module rather than an extra. It provides `make reviews`, and `.ai-coding-dev/agents.md` — delivered to every consumer whether or not the line is present — tells agents to run it; without the include every command in those instructions fails with `No rule to make target 'reviews'`.
+
 `-include`, not `include`: the trim directory is written when the REPRO starts, so a fresh clone has to be able to build without it.
+
+**Upgrading.** `make build-image` will not pick up a new version of the module: `repro.require` runs in a cached layer, and nothing reports the miss. Use `make rebuild-image`.
 
 `REVIEWS_REPORT` defaults to `REVIEW.md` at the root of the consuming REPRO and can be overridden with `repro.env`. `REVIEWS_LOG` and `REVIEWS_BY` are not declared: the log belongs to whichever repository the command runs in, and the reviewer to the session.
 
